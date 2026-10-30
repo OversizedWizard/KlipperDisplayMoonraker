@@ -239,10 +239,10 @@ QProgressBar#TempBar::chunk {{
     border-radius: {px(4)};
 }}
 QProgressBar#TempBar[kind="nozzle"]::chunk {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FFB547, stop:1 #FF4D00);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00D2FF, stop:1 #2563EB);
 }}
 QProgressBar#TempBar[kind="bed"]::chunk {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00E5FF, stop:1 #3A86FF);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00D2FF, stop:1 #2563EB);
 }}
 
 QProgressBar#PrintProgressBar {{

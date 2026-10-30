@@ -87,6 +87,61 @@ class TempCard(QtWidgets.QFrame):
             return True
         return super().event(e)
 
+    @staticmethod
+    def _lerp_hex(c1: tuple, c2: tuple, t: float) -> str:
+        t = max(0.0, min(1.0, t))
+        r = round(c1[0] + (c2[0] - c1[0]) * t)
+        g = round(c1[1] + (c2[1] - c1[1]) * t)
+        b = round(c1[2] + (c2[2] - c1[2]) * t)
+        return f"#{r:02X}{g:02X}{b:02X}"
+
+    def _update_bar_thermal_color(self, current: float, target: float):
+        """Color bar blue when cold, orange when warm, and red when hot / at target temp."""
+        if self.kind == "bed":
+            # Bed: <= 28°C cold (blue), ~42°C warm to touch (orange), >= 55°C hot to touch (red)
+            abs_t = (current - 26.0) / (55.0 - 26.0)
+            if target > 30.0:
+                tgt_t = (current - 25.0) / max(target - 25.0, 15.0)
+                t = max(abs_t, tgt_t)
+            else:
+                t = abs_t
+        else:
+            # Nozzle: <= 32°C cold (blue), ~95°C warm (orange), >= 165°C or at target (red)
+            abs_t = (current - 30.0) / (165.0 - 30.0)
+            if target > 45.0:
+                tgt_t = (current - 28.0) / max(target - 28.0, 25.0)
+                t = max(abs_t, tgt_t)
+            else:
+                t = abs_t
+
+        t = max(0.0, min(1.0, t))
+
+        # Cold Blue -> Warm Orange -> Hot Red
+        cold_start, cold_end = (0, 210, 255), (37, 99, 235)     # #00D2FF -> #2563EB (Blue)
+        warm_start, warm_end = (245, 158, 11), (255, 102, 0)    # #F59E0B -> #FF6600 (Orange)
+        hot_start, hot_end = (255, 77, 0), (239, 30, 30)        # #FF4D00 -> #EF1E1E (Red)
+
+        if t <= 0.5:
+            u = t / 0.5
+            c0 = self._lerp_hex(cold_start, warm_start, u)
+            c1 = self._lerp_hex(cold_end, warm_end, u)
+        else:
+            u = (t - 0.5) / 0.5
+            c0 = self._lerp_hex(warm_start, hot_start, u)
+            c1 = self._lerp_hex(warm_end, hot_end, u)
+
+        self.bar.setStyleSheet(f"""
+            QProgressBar#TempBar {{
+                background: rgba(255, 255, 255, 18);
+                border: none;
+                border-radius: 4px;
+            }}
+            QProgressBar#TempBar::chunk {{
+                border-radius: 4px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {c0}, stop:1 {c1});
+            }}
+        """)
+
     def set_temps(self, current: float, target: float):
         self.current_val = float(current)
         self.target_val = float(target)
@@ -94,7 +149,8 @@ class TempCard(QtWidgets.QFrame):
         self.target.setText(f"Target {target:.0f}\u00B0C" if target > 0 else "Target off")
 
         if target <= 0:
-            state, text = ("cooling", "COOLING") if current >= 45.0 else ("off", "IDLE")
+            hot_thresh = 38.0 if self.kind == "bed" else 45.0
+            state, text = ("cooling", "COOLING") if current >= hot_thresh else ("off", "IDLE")
         elif abs(current - target) <= 1.5:
             state, text = "ready", "READY"
         elif current < target:
@@ -106,9 +162,14 @@ class TempCard(QtWidgets.QFrame):
         self.state.style().unpolish(self.state)
         self.state.style().polish(self.state)
 
-        max_scale = 260.0 if self.kind == "nozzle" else 110.0
-        ratio = min(current / target, 1.0) if target > 0 else min(max(current, 0.0) / max_scale, 1.0)
+        max_scale = 260.0 if self.kind == "nozzle" else 100.0
+        if target > 0:
+            ratio = min(max(current / target, 0.18), 1.0)
+        else:
+            # Keep a clearly visible cold blue bar (minimum 22%) when idle/cold, scaling up with heat
+            ratio = min(max(current / max_scale, 0.22), 1.0)
         self.bar.setValue(int(ratio * 1000))
+        self._update_bar_thermal_color(current, target)
 
     def apply_scale(self, s: float):
         # Sized +20% again

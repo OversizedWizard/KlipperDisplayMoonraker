@@ -28,7 +28,7 @@ class PrinterTestsScreen(QtWidgets.QFrame):
         self._poll_tick = 0
         self._tare_timestamp = 0.0
         self._has_load_cell = True
-        self._touch_threshold_g = 1.5  # Sensitive nozzle touch delta threshold (g)
+        self._touch_threshold_g = 75.0  # Load cell Z trigger threshold in grams (75g)
         self._baseline_force_g = None
         self._prev_force_g = None
         self._last_min_fg = 0.0
@@ -123,7 +123,7 @@ class PrinterTestsScreen(QtWidgets.QFrame):
         endstop_defs = [
             ("stepper_x", "X-Axis Endstop", "Physical limit switch (stepper_x)"),
             ("stepper_y", "Y-Axis Endstop", "Physical limit switch (stepper_y)"),
-            ("stepper_z", "Z Endstop (Load Cell Probe)", "Touch nozzle to trigger CLOSED"),
+            ("stepper_z", "Z Endstop (Load Cell Probe)", "Touch nozzle (≥ 75 g) to trigger CLOSED"),
         ]
 
         for key, label, hint in endstop_defs:
@@ -165,7 +165,7 @@ class PrinterTestsScreen(QtWidgets.QFrame):
             }
 
         # Live Load Cell Force Meter bar
-        self.lc_info_lbl = QtWidgets.QLabel("Load Cell Force: 0.0 g  •  Touch nozzle to test trigger")
+        self.lc_info_lbl = QtWidgets.QLabel("Load Cell Force: 0.0 g  •  Triggers at ≥ 75 g")
         self.lc_info_lbl.setStyleSheet(f"color: #38BDF8; font-size: {_s(10, scale)}px; font-weight: 700;")
         left_lay.addWidget(self.lc_info_lbl)
 
@@ -459,11 +459,10 @@ class PrinterTestsScreen(QtWidgets.QFrame):
             self._baseline_force_g = 0.85 * self._baseline_force_g + 0.15 * fg
             delta_from_baseline = abs(fg - self._baseline_force_g)
 
-        # Trigger CLOSED whenever weight changes from touch (delta >= 1.5g, spread >= 1.4g, or step >= 1.0g)
+        # Trigger CLOSED when load cell force or change reaches 75g threshold
+        peak_force = max(abs(fg), delta_from_baseline, window_spread)
         active_touch = (
-            (delta_from_baseline >= self._touch_threshold_g)
-            or (window_spread >= 1.4)
-            or (step_delta >= 1.0)
+            (peak_force >= self._touch_threshold_g)
             or probe_closed
             or hw_z_closed
         )
@@ -474,7 +473,7 @@ class PrinterTestsScreen(QtWidgets.QFrame):
         if active_touch:
             self._last_touch_time = now
             self._last_touch_force_g = fg
-            self._last_touch_delta_g = max(delta_from_baseline, window_spread, step_delta, abs(fg))
+            self._last_touch_delta_g = peak_force
 
         # Latch CLOSED state for 2.2s after touch so tapping nozzle + clicking Refresh Endstops shows CLOSED
         is_touched = active_touch or ((now - self._last_touch_time) < 2.2)
@@ -484,24 +483,24 @@ class PrinterTestsScreen(QtWidgets.QFrame):
         self._style_endstop_pill(z_row["pill"], is_closed=is_touched)
 
         if is_touched:
-            disp_delta = max(delta_from_baseline, window_spread, self._last_touch_delta_g)
-            z_row["sub"].setText(f"TRIGGERED! Force: {fg:+.1f} g (Δ {disp_delta:.1f} g)")
+            disp_delta = max(peak_force, self._last_touch_delta_g)
+            z_row["sub"].setText(f"TRIGGERED! Force: {fg:+.1f} g (Peak: {disp_delta:.1f} g)")
             z_row["sub"].setStyleSheet(
                 f"color: #F87171; font-size: {_s(10, self.scale)}px; font-weight: 800; border: none; background: transparent;"
             )
             self.lc_info_lbl.setText(
-                f"● PROBE CLOSED (TRIGGERED) • Force: {fg:+.1f} g (Δ {disp_delta:.1f} g)"
+                f"● PROBE CLOSED (TRIGGERED) • Force: {fg:+.1f} g (Peak: {disp_delta:.1f} g)"
             )
             self.lc_info_lbl.setStyleSheet(
                 f"color: #EF4444; font-size: {_s(10, self.scale)}px; font-weight: 900;"
             )
         else:
-            z_row["sub"].setText(f"Force: {fg:+.1f} g (Δ {delta_from_baseline:.1f} g) • Touch nozzle")
+            z_row["sub"].setText(f"Force: {fg:+.1f} g • Touch nozzle (≥ {self._touch_threshold_g:.0f} g)")
             z_row["sub"].setStyleSheet(
                 f"color: #94A3B8; font-size: {_s(10, self.scale)}px; font-weight: 600; border: none; background: transparent;"
             )
             self.lc_info_lbl.setText(
-                f"○ Probe Open • Force: {fg:+.1f} g (Triggers on ≥ {self._touch_threshold_g:.1f} g change)"
+                f"○ Probe Open • Force: {fg:+.1f} g (Triggers at ≥ {self._touch_threshold_g:.0f} g)"
             )
             self.lc_info_lbl.setStyleSheet(
                 f"color: #38BDF8; font-size: {_s(10, self.scale)}px; font-weight: 700;"
