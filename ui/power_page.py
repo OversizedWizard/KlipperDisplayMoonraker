@@ -22,6 +22,7 @@ class PowerActionCard(QtWidgets.QFrame):
         self.setObjectName("CalibrateCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
 
         self._layout = QtWidgets.QHBoxLayout(self)
 
@@ -56,7 +57,7 @@ class PowerActionCard(QtWidgets.QFrame):
 
         self._layout.addLayout(mid, 1)
 
-        self.arrow = QtWidgets.QLabel("\u203A")
+        self.arrow = QtWidgets.QLabel("›")
         self.arrow.setObjectName("CalCardArrow")
         if is_danger:
             self.arrow.setStyleSheet("color: #EF4444; font-weight: 800;")
@@ -73,6 +74,7 @@ class PowerActionCard(QtWidgets.QFrame):
         m = _s(12, s)
         self._layout.setContentsMargins(m, _s(8, s), m, _s(8, s))
         self._layout.setSpacing(_s(10, s))
+        self.setMinimumHeight(_s(72, s))
         self.icon_label.setPixmap(icons.pixmap(self.icon_name, _s(38, s)))
         self.icon_label.setFixedSize(_s(42, s), _s(42, s))
 
@@ -104,14 +106,17 @@ class PowerPage(QtWidgets.QWidget):
         self.headers = []
         self.cards = []
 
+        # Single unified grid so columns 0 and 1 are exactly 50% width each
+        self.grid = QtWidgets.QGridLayout()
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.grid.setColumnStretch(0, 1)
+        self.grid.setColumnStretch(1, 1)
+
         # --- Section 1: Klipper Restarts ---
         sec1 = QtWidgets.QLabel("KLIPPER SERVICE & FIRMWARE RESTART")
         sec1.setObjectName("SettingsSecHeader")
-        self.vbox.addWidget(sec1)
+        self.grid.addWidget(sec1, 0, 0, 1, 2)
         self.headers.append(sec1)
-
-        grid1 = QtWidgets.QGridLayout()
-        grid1.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.klipper_restart_card = PowerActionCard(
             "reload", "Klipper Restart",
@@ -119,7 +124,7 @@ class PowerPage(QtWidgets.QWidget):
             "RESTART",
             on_click=self._on_klipper_restart
         )
-        grid1.addWidget(self.klipper_restart_card, 0, 0)
+        self.grid.addWidget(self.klipper_restart_card, 1, 0)
         self.cards.append(self.klipper_restart_card)
 
         self.fw_restart_card = PowerActionCard(
@@ -128,34 +133,14 @@ class PowerPage(QtWidgets.QWidget):
             "FIRMWARE_RESTART",
             on_click=self._on_fw_restart
         )
-        grid1.addWidget(self.fw_restart_card, 0, 1)
+        self.grid.addWidget(self.fw_restart_card, 1, 1)
         self.cards.append(self.fw_restart_card)
 
-        grid1.setColumnStretch(0, 1)
-        grid1.setColumnStretch(1, 1)
-        self.vbox.addLayout(grid1)
-        self.grid1 = grid1
-
-        self.vbox.addSpacing(8)
-
-        # --- Section 2: Host System & Emergency Stop ---
-        sec2 = QtWidgets.QLabel("HOST SYSTEM & EMERGENCY STOP")
+        # --- Section 2: Host System ---
+        sec2 = QtWidgets.QLabel("HOST SYSTEM (PI)")
         sec2.setObjectName("SettingsSecHeader")
-        self.vbox.addWidget(sec2)
+        self.grid.addWidget(sec2, 2, 0, 1, 2)
         self.headers.append(sec2)
-
-        grid2 = QtWidgets.QGridLayout()
-        grid2.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        self.m112_card = PowerActionCard(
-            "power", "Emergency Stop",
-            "Immediately halt all motors and shut down all heaters.",
-            "M112",
-            on_click=self._on_emergency_stop,
-            is_danger=True
-        )
-        grid2.addWidget(self.m112_card, 0, 0)
-        self.cards.append(self.m112_card)
 
         self.reboot_card = PowerActionCard(
             "restart", "Reboot Host (Pi)",
@@ -163,7 +148,7 @@ class PowerPage(QtWidgets.QWidget):
             "REBOOT",
             on_click=self._on_host_reboot
         )
-        grid2.addWidget(self.reboot_card, 0, 1)
+        self.grid.addWidget(self.reboot_card, 3, 0)
         self.cards.append(self.reboot_card)
 
         self.shutdown_card = PowerActionCard(
@@ -172,14 +157,27 @@ class PowerPage(QtWidgets.QWidget):
             "SHUTDOWN",
             on_click=self._on_host_shutdown
         )
-        grid2.addWidget(self.shutdown_card, 1, 0)
+        self.grid.addWidget(self.shutdown_card, 3, 1)
         self.cards.append(self.shutdown_card)
 
-        grid2.setColumnStretch(0, 1)
-        grid2.setColumnStretch(1, 1)
-        self.vbox.addLayout(grid2)
-        self.grid2 = grid2
+        # --- Section 3: Emergency Actions ---
+        sec3 = QtWidgets.QLabel("EMERGENCY ACTIONS")
+        sec3.setObjectName("SettingsSecHeader")
+        sec3.setStyleSheet("color: #F87171;")
+        self.grid.addWidget(sec3, 4, 0, 1, 2)
+        self.headers.append(sec3)
 
+        self.m112_card = PowerActionCard(
+            "power", "Emergency Stop",
+            "Immediately halt all motors and shut down all heaters (M112).",
+            "M112",
+            on_click=self._on_emergency_stop,
+            is_danger=True
+        )
+        self.grid.addWidget(self.m112_card, 5, 0, 1, 2)
+        self.cards.append(self.m112_card)
+
+        self.vbox.addLayout(self.grid)
         self.vbox.addStretch(1)
         self.scroll.setWidget(self.container)
         main_layout.addWidget(self.scroll)
@@ -282,12 +280,9 @@ class PowerPage(QtWidgets.QWidget):
         m = _s(14, s)
         self.vbox.setContentsMargins(m, m, m, m)
         self.vbox.setSpacing(_s(8, s))
-        self.grid1.setHorizontalSpacing(_s(12, s))
-        self.grid1.setVerticalSpacing(_s(10, s))
-        self.grid2.setHorizontalSpacing(_s(12, s))
-        self.grid2.setVerticalSpacing(_s(10, s))
+        self.grid.setHorizontalSpacing(_s(12, s))
+        self.grid.setVerticalSpacing(_s(10, s))
         for h in self.headers:
             h.setStyleSheet(f"font-size: {_s(11, s)}px; font-weight: 800; letter-spacing: 0.8px; color: #94A3B8; margin-top: {_s(6, s)}px; margin-bottom: {_s(2, s)}px;")
         for card in self.cards:
             card.apply_scale(s)
-
