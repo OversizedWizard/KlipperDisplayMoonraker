@@ -563,8 +563,9 @@ class MoonrakerClient(QtCore.QObject):
         self.post_endpoint("/printer/print/resume", on_done=on_done, timeout=10.0)
 
     def cancel_print(self, on_done=None):
-        """Cancel active print."""
-        self.post_endpoint("/printer/print/cancel", on_done=on_done, timeout=10.0)
+        """Cancel active print immediately."""
+        self.send_gcode("CANCEL_PRINT")
+        self.post_endpoint("/printer/print/cancel", on_done=on_done, timeout=5.0)
 
     def set_speed_factor(self, percent: int, on_done=None):
         """Set speed factor feedrate override (e.g. 100)."""

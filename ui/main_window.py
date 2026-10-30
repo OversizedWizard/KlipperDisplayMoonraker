@@ -349,6 +349,9 @@ class MainWindow(QtWidgets.QWidget):
         # If print started while on files page, switch to printing screen
         if state == "printing" and getattr(self, "_current_page", "") == "files":
             self.show_page("printing")
+        # If print has cancelled while on printing page, return to home page
+        elif state in ("cancelled", "cancelling") and getattr(self, "_current_page", "") == "printing":
+            QtCore.QTimer.singleShot(700, lambda: self.show_page("home"))
 
     def _on_connection_changed(self, connected: bool, host: str, klippy_state: str):
         self.topbar.set_connection(connected, host, klippy_state)

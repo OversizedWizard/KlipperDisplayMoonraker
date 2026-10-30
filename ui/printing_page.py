@@ -685,6 +685,16 @@ class PrintingPage(QtWidgets.QWidget):
                 border: 1px solid #00E5FF; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
             """)
             self.actions_stack.setCurrentIndex(1)
+        elif state in ("cancelled", "cancelling"):
+            self.status_pill.setText("🚫 CANCELLED")
+            self.status_pill.setStyleSheet("""
+                color: #EF4444; background: rgba(239, 68, 68, 0.18);
+                border: 1px solid #EF4444; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+            """)
+            self.actions_stack.setCurrentIndex(0)
+            main_win = self.window()
+            if hasattr(main_win, "show_page"):
+                QtCore.QTimer.singleShot(700, lambda: main_win.show_page("home"))
         else:
             self.status_pill.setText(state.upper())
             self.status_pill.setStyleSheet("""
@@ -761,6 +771,14 @@ class PrintingPage(QtWidgets.QWidget):
         mr = getattr(self.window(), "moonraker", None)
         if mr:
             mr.cancel_print()
+        self.status_pill.setText("🚫 CANCELLING...")
+        self.status_pill.setStyleSheet("""
+            color: #EF4444; background: rgba(239, 68, 68, 0.18);
+            border: 1px solid #EF4444; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+        """)
+        main_win = self.window()
+        if hasattr(main_win, "show_page"):
+            QtCore.QTimer.singleShot(700, lambda: main_win.show_page("home"))
 
     def _on_save_z_offset(self):
         mr = getattr(self.window(), "moonraker", None)
