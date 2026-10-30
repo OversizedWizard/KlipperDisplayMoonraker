@@ -770,6 +770,7 @@ class PrintingPage(QtWidgets.QWidget):
     def _do_cancel(self):
         mr = getattr(self.window(), "moonraker", None)
         if mr:
+            mr.cooldown()
             mr.cancel_print()
         self.status_pill.setText("🚫 CANCELLING...")
         self.status_pill.setStyleSheet("""

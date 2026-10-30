@@ -562,10 +562,17 @@ class MoonrakerClient(QtCore.QObject):
         """Resume paused print."""
         self.post_endpoint("/printer/print/resume", on_done=on_done, timeout=10.0)
 
+    def cooldown(self, on_done=None):
+        """Immediately turn off all heaters and fans."""
+        cmd = "TURN_OFF_HEATERS\nM104 S0\nM140 S0\nM106 S0\nSET_HEATER_TEMPERATURE HEATER=extruder TARGET=0\nSET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0"
+        self.send_gcode(cmd, on_done=on_done, timeout=5.0)
+
     def cancel_print(self, on_done=None):
-        """Cancel active print immediately."""
-        self.send_gcode("CANCEL_PRINT")
+        """Cancel active print immediately and set cooldown straight away."""
+        cmd = "TURN_OFF_HEATERS\nM104 S0\nM140 S0\nM106 S0\nCANCEL_PRINT"
+        self.send_gcode(cmd)
         self.post_endpoint("/printer/print/cancel", on_done=on_done, timeout=5.0)
+        self.cooldown()
 
     def set_speed_factor(self, percent: int, on_done=None):
         """Set speed factor feedrate override (e.g. 100)."""
