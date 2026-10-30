@@ -245,7 +245,7 @@ class PowerPage(QtWidgets.QWidget):
                 tile.sub_label.setText("EMERGENCY STOP executed. Heaters off.")
                 tile.badge_lbl.setText("HALTED")
                 QtCore.QTimer.singleShot(3500, lambda: self._reset_card(tile))
-            mr.send_gcode("M112", on_done=on_done, timeout=10.0)
+            mr.emergency_stop(on_done=on_done)
         else:
             QtCore.QTimer.singleShot(800, lambda: [
                 tile.sub_label.setText("Emergency stop triggered (offline mode)."),

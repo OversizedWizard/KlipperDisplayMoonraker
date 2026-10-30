@@ -135,6 +135,26 @@ QLabel#ProbePill[state="alert"] {{
     background: rgba(251, 191, 36, 28);
     border: 1px solid rgba(251, 191, 36, 100);
 }}
+QPushButton#EmergencyStopBtn {{
+    color: #FFFFFF;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #EF4444, stop:1 #B91C1C);
+    border: 1px solid #F87171;
+    border-radius: {px(8)};
+    padding: {px(3)} {px(10)};
+    font-size: {px(11)};
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}}
+QPushButton#EmergencyStopBtn:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #F87171, stop:1 #DC2626);
+    border: 1px solid #FCA5A5;
+}}
+QPushButton#EmergencyStopBtn:pressed {{
+    background: #7F1D1D;
+    border: 1px solid #DC2626;
+}}
 
 /* ---------- Content ---------- */
 QFrame#Card {{

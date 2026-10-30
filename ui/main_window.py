@@ -98,6 +98,13 @@ class TopBar(QtWidgets.QFrame):
         self._layout.addLayout(titles)
         self._layout.addStretch(1)
 
+        self.estop_btn = QtWidgets.QPushButton("EMERGENCY STOP")
+        self.estop_btn.setObjectName("EmergencyStopBtn")
+        self.estop_btn.setToolTip("Emergency Stop - Immediately halt motors and heaters (M112)")
+        self.estop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.estop_btn.clicked.connect(self._on_estop_click)
+        self._layout.addWidget(self.estop_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
         self.status = QtWidgets.QLabel("\u25CF  NOT CONNECTED")
         self.status.setObjectName("StatusPill")
         self._layout.addWidget(self.status, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -119,6 +126,17 @@ class TopBar(QtWidgets.QFrame):
         self._timer.timeout.connect(self._tick)
         self._timer.start()
         self._tick()
+
+    def _on_estop_click(self):
+        main_win = self.window()
+        from .emergency_stop_dialog import EmergencyStopOverlay
+        if getattr(main_win, "_estop_overlay", None) and main_win._estop_overlay.isVisible():
+            return
+        overlay = EmergencyStopOverlay(parent=main_win, scale=getattr(self, "_scale", 1.0))
+        main_win._estop_overlay = overlay
+        overlay.setGeometry(main_win.rect())
+        overlay.show()
+        overlay.raise_()
 
     def _on_probe_click(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -153,15 +171,16 @@ class TopBar(QtWidgets.QFrame):
 
     def set_connection(self, connected: bool, host: str, klippy_state: str):
         if connected and klippy_state == "ready":
-            short_host = host.split(":")[0]
-            self.status.setText(f"\u25CF  CONNECTED ({short_host})")
+            self.status.setText("\u25CF  CONNECTED")
+            self.status.setToolTip(f"Connected to {host}")
             state = "connected"
         elif connected:
-            short_host = host.split(":")[0]
-            self.status.setText(f"\u25CF  {klippy_state.upper()} ({short_host})")
+            self.status.setText(f"\u25CF  {klippy_state.upper()}")
+            self.status.setToolTip(f"State: {klippy_state} ({host})")
             state = "standby"
         else:
             self.status.setText("\u25CF  NOT CONNECTED")
+            self.status.setToolTip("Disconnected from Moonraker")
             state = "disconnected"
         if self.status.property("state") != state:
             self.status.setProperty("state", state)
@@ -173,7 +192,10 @@ class TopBar(QtWidgets.QFrame):
         self.setFixedHeight(_s(50, s))
         self._layout.setContentsMargins(_s(18, s), 0, _s(16, s), 0)
         self._layout.setSpacing(_s(10, s))
-
+        self.estop_btn.setFixedHeight(_s(30, s))
+        icon_sz = _s(16, s)
+        self.estop_btn.setIcon(icons.icon("estop", icon_sz))
+        self.estop_btn.setIconSize(QtCore.QSize(icon_sz, icon_sz))
 
 class PlaceholderPage(QtWidgets.QWidget):
     """Empty page shell - real content gets built per page later."""
@@ -361,6 +383,8 @@ class MainWindow(QtWidgets.QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._resize_timer.start()
+        if hasattr(self, "_estop_overlay") and self._estop_overlay and self._estop_overlay.isVisible():
+            self._estop_overlay.setGeometry(self.rect())
 
     def apply_scale(self):
         s = min(self.width() / BASE_W, self.height() / BASE_H)

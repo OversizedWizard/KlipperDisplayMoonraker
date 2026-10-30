@@ -302,6 +302,45 @@ class MoonrakerClient(QtCore.QObject):
 
         threading.Thread(target=_run, daemon=True).start()
 
+    def emergency_stop(self, on_done=None):
+        """Trigger immediate emergency stop via Moonraker /printer/emergency_stop with M112 fallback."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _run():
+            ok = False
+            try:
+                url = f"http://{host}/printer/emergency_stop"
+                req = urllib.request.Request(
+                    url,
+                    data=b"{}",
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=3.0) as resp:
+                    ok = (resp.status == 200)
+            except Exception:
+                ok = False
+
+            if not ok:
+                try:
+                    url = f"http://{host}/printer/gcode/script"
+                    body = json.dumps({"script": "M112"}).encode("utf-8")
+                    req = urllib.request.Request(
+                        url,
+                        data=body,
+                        headers={"Content-Type": "application/json"},
+                        method="POST"
+                    )
+                    with urllib.request.urlopen(req, timeout=3.0) as resp:
+                        ok = (resp.status == 200)
+                except Exception:
+                    ok = False
+
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(ok))
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def jog(self, axis: str, distance: float, on_done=None):
         """Relative jog for X, Y, or Z."""
         speed = 600 if axis.upper() == "Z" else 3000
