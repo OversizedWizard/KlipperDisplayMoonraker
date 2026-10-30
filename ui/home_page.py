@@ -486,38 +486,52 @@ class HomePage(QtWidgets.QWidget):
             mr.motors_off()
         QtCore.QTimer.singleShot(1400, lambda: self.btn_motors_off.setText("\u26A1  Turn Off Motors (M84)"))
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._check_mesh_config()
+
+    def _check_mesh_config(self):
+        main_win = self.window()
+        mr = getattr(main_win, "moonraker", None)
+        if mr:
+            mr.check_start_gcode_mesh(on_done=self._on_mesh_checked)
+
+    def _on_mesh_checked(self, is_enabled: bool, is_configured: bool):
+        self._mesh_active = is_enabled
+        self._mesh_configured = is_configured
+        self._update_mesh_button_ui()
+
     def update_config(self, config: dict, objects: list):
         """Called when Moonraker loads Klipper configuration. Checks if bed_mesh is enabled or commented out."""
         self._mesh_configured = ("bed_mesh" in config) or ("bed_mesh" in objects)
-        self._update_mesh_button_ui()
-
-    def update_bed_mesh(self, bm: dict):
-        """Called whenever Moonraker emits live bed_mesh status."""
-        profile = bm.get("profile_name", "")
-        self._mesh_active = bool(profile)
-        self._update_mesh_button_ui()
+        self._check_mesh_config()
 
     def _on_toggle_bed_mesh(self):
-        """Toggle bed mesh leveling on/off."""
+        """Toggle bed mesh in start gcode macro, save printer.cfg, and restart firmware."""
         main_win = self.window()
         mr = getattr(main_win, "moonraker", None)
-        if not self._mesh_configured:
-            self.btn_bed_mesh.setText("⊞  Disabled in cfg")
-            QtCore.QTimer.singleShot(1800, self._update_mesh_button_ui)
+        if not mr:
             return
 
-        if self._mesh_active:
-            # Active -> Clear bed mesh
-            if mr and mr.connected:
-                mr.send_gcode("BED_MESH_CLEAR")
-            self._mesh_active = False
-        else:
-            # Disabled -> Load default bed mesh
-            if mr and mr.connected:
-                mr.send_gcode("BED_MESH_PROFILE LOAD=default")
-            self._mesh_active = True
+        s = getattr(self, "_scale", 1.0)
+        self.btn_bed_mesh.setText("⊞  Saving & Restarting...")
+        self.btn_bed_mesh.setStyleSheet(f"""
+            QPushButton#BedMeshBtn {{
+                background: rgba(245, 158, 11, 0.25);
+                color: #F59E0B;
+                border: 1.5px solid #F59E0B;
+                border-radius: {_s(8, s)}px;
+                font-size: {_s(11, s)}px;
+                font-weight: 800;
+                padding: 0 {_s(6, s)}px;
+            }}
+        """)
 
-        self._update_mesh_button_ui()
+        def _done(new_state: bool):
+            self._mesh_active = new_state
+            self._update_mesh_button_ui()
+
+        mr.toggle_start_gcode_mesh(on_done=_done)
 
     def _update_mesh_button_ui(self):
         s = getattr(self, "_scale", 1.0)
@@ -535,7 +549,7 @@ class HomePage(QtWidgets.QWidget):
                 }}
             """)
         elif self._mesh_active:
-            self.btn_bed_mesh.setText("⊞  Mesh Level: ON")
+            self.btn_bed_mesh.setText("⊞  Bed Mesh: ON")
             self.btn_bed_mesh.setStyleSheet(f"""
                 QPushButton#BedMeshBtn {{
                     background: rgba(16, 185, 129, 0.20);
@@ -553,7 +567,7 @@ class HomePage(QtWidgets.QWidget):
                 }}
             """)
         else:
-            self.btn_bed_mesh.setText("⊞  Mesh Level: OFF")
+            self.btn_bed_mesh.setText("⊞  Bed Mesh: OFF")
             self.btn_bed_mesh.setStyleSheet(f"""
                 QPushButton#BedMeshBtn {{
                     background: rgba(239, 68, 68, 0.16);

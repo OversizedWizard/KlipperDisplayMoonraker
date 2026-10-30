@@ -6,9 +6,11 @@ polling live temperatures and printer connection state on a background thread.
 
 import json
 import os
+import re
 import threading
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Optional
 
 from .qt import QtCore, Signal
@@ -571,3 +573,184 @@ class MoonrakerClient(QtCore.QObject):
         else:
             cmd = "Z_OFFSET_APPLY_ENDSTOP\\nSAVE_CONFIG"
         self.send_gcode(cmd, on_done=on_done, timeout=20.0)
+
+    def get_printer_cfg(self, on_done=None):
+        """Fetch raw printer.cfg content from Moonraker or local filesystem."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _run():
+            content = ""
+            # Check local file first if on Linux / Pi
+            local_paths = [
+                os.path.expanduser("~/printer_data/config/printer.cfg"),
+                "/home/pi/printer_data/config/printer.cfg",
+            ]
+            for lp in local_paths:
+                if os.path.exists(lp):
+                    try:
+                        with open(lp, "r", encoding="utf-8") as f:
+                            content = f.read()
+                            break
+                    except Exception:
+                        pass
+
+            if not content:
+                try:
+                    url = f"http://{host}/server/files/config/printer.cfg"
+                    req = urllib.request.Request(url, headers={"User-Agent": "KlipperDisplay"})
+                    with urllib.request.urlopen(req, timeout=4.0) as resp:
+                        if resp.status == 200:
+                            content = resp.read().decode("utf-8")
+                except Exception:
+                    pass
+
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(content))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def save_printer_cfg(self, content: str, on_done=None):
+        """Save printer.cfg to Moonraker and local filesystem."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _run():
+            ok = False
+            # 1. Direct local file write if on Linux / Pi
+            local_paths = [
+                os.path.expanduser("~/printer_data/config/printer.cfg"),
+                "/home/pi/printer_data/config/printer.cfg",
+            ]
+            for lp in local_paths:
+                if os.path.exists(lp):
+                    try:
+                        with open(lp, "w", encoding="utf-8") as f:
+                            f.write(content)
+                        ok = True
+                    except Exception:
+                        pass
+
+            # 2. Upload via Moonraker multipart form-data to /server/files/upload
+            try:
+                boundary = "----KlipperDisplayBoundary" + uuid.uuid4().hex
+                raw_bytes = content.encode("utf-8")
+                body = bytearray()
+                # Field: root=config
+                body.extend(f"--{boundary}\r\n".encode("utf-8"))
+                body.extend(b'Content-Disposition: form-data; name="root"\r\n\r\n')
+                body.extend(b"config\r\n")
+                # Field: file=printer.cfg
+                body.extend(f"--{boundary}\r\n".encode("utf-8"))
+                body.extend(b'Content-Disposition: form-data; name="file"; filename="printer.cfg"\r\n')
+                body.extend(b"Content-Type: text/plain\r\n\r\n")
+                body.extend(raw_bytes)
+                body.extend(b"\r\n")
+                body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+
+                req = urllib.request.Request(
+                    f"http://{host}/server/files/upload",
+                    data=bytes(body),
+                    headers={
+                        "Content-Type": f"multipart/form-data; boundary={boundary}",
+                        "Content-Length": str(len(body))
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=6.0) as resp:
+                    if resp.status in (200, 201):
+                        ok = True
+            except Exception as e:
+                print(f"[Moonraker] save_printer_cfg error: {e}")
+
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(ok))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def check_start_gcode_mesh(self, on_done=None):
+        """Check if bed mesh is active/unhashed or hashed out in the start gcode macro."""
+        def _on_cfg(content: str):
+            if not content:
+                if on_done:
+                    on_done(False, False)
+                return
+
+            is_configured = "[bed_mesh" in content
+            m = re.search(r"\[gcode_macro\s+(?:PRINT_START|START_PRINT)\].*?(?=\n\[|\Z)", content, re.DOTALL | re.IGNORECASE)
+            if not m:
+                if on_done:
+                    on_done(False, is_configured)
+                return
+
+            macro_lines = m.group(0).splitlines()
+            is_enabled = False
+            for line in macro_lines:
+                clean = line.strip()
+                if re.search(r"bed_mesh_(?:profile\s+load|calibrate)", clean, re.IGNORECASE):
+                    if not clean.startswith("#"):
+                        is_enabled = True
+                        break
+
+            if on_done:
+                on_done(is_enabled, is_configured)
+
+        self.get_printer_cfg(on_done=_on_cfg)
+
+    def toggle_start_gcode_mesh(self, on_done=None):
+        """Hash or unhash the bed mesh command in the start gcode macro, save printer.cfg, and restart firmware."""
+        def _on_cfg(content: str):
+            if not content:
+                if on_done:
+                    on_done(False)
+                return
+
+            m = re.search(r"(\[gcode_macro\s+(?:PRINT_START|START_PRINT)\].*?)(?=\n\[|\Z)", content, re.DOTALL | re.IGNORECASE)
+            if not m:
+                if on_done:
+                    on_done(False)
+                return
+
+            macro_full = m.group(1)
+            lines = macro_full.splitlines()
+
+            # Find existing bed_mesh line in start macro
+            found_idx = -1
+            for i, line in enumerate(lines):
+                clean = line.strip()
+                if re.search(r"bed_mesh_(?:profile\s+load|calibrate)", clean, re.IGNORECASE):
+                    found_idx = i
+                    break
+
+            if found_idx != -1:
+                old_line = lines[found_idx]
+                is_currently_hashed = old_line.strip().startswith("#")
+                new_state = is_currently_hashed # If hashed -> enable (True), if unhashed -> disable (False)
+
+                if new_state: # Enable -> Unhash
+                    clean_cmd = re.sub(r"^\s*#+\s*", "", old_line)
+                    lines[found_idx] = f"    {clean_cmd}"
+                else: # Disable -> Hash out
+                    clean_cmd = re.sub(r"^\s*#*\s*", "", old_line)
+                    lines[found_idx] = f"    # {clean_cmd}"
+            else:
+                # Line wasn't present at all -> insert it enabled
+                new_state = True
+                insert_idx = -1
+                for i, line in enumerate(lines):
+                    if re.search(r"G1\s+Z15", line, re.IGNORECASE) or re.search(r"G28\s+Z", line, re.IGNORECASE):
+                        insert_idx = i + 1
+                if insert_idx == -1:
+                    insert_idx = len(lines) - 2
+                lines.insert(insert_idx, "    BED_MESH_PROFILE LOAD=default")
+
+            new_macro = "\n".join(lines)
+            new_content = content[:m.start(1)] + new_macro + content[m.end(1):]
+
+            def _on_saved(saved_ok: bool):
+                if saved_ok:
+                    self.firmware_restart()
+                if on_done:
+                    on_done(new_state)
+
+            self.save_printer_cfg(new_content, on_done=_on_saved)
+
+        self.get_printer_cfg(on_done=_on_cfg)
