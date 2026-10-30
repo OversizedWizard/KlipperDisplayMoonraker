@@ -53,8 +53,8 @@ Clone this repository to your printer host (e.g., Raspberry Pi) and run the auto
 
 ```bash
 cd ~
-git clone https://github.com/<YOUR_USERNAME>/klipper-touch-display.git
-cd klipper-touch-display
+git clone https://github.com/OversizedWizard/KlipperDisplayMoonraker.git
+cd KlipperDisplayMoonraker
 chmod +x install.sh
 ./install.sh
 ```
