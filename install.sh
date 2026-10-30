@@ -22,6 +22,11 @@ echo -e "${C_RESET}"
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 CURRENT_USER="$(id -un)"
 
+# Ignore chmod permission changes so future 'git pull' updates never fail with merge conflicts
+if command -v git >/dev/null 2>&1 && [ -d "$INSTALL_DIR/.git" ]; then
+    git -C "$INSTALL_DIR" config core.fileMode false || true
+fi
+
 # Check running environment
 if [ "$EUID" -eq 0 ]; then
     echo -e "${C_AMBER}[!] Warning: Please run this script as your regular user (e.g., pi or biqu), not root.${C_RESET}"

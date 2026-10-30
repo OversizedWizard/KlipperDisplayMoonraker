@@ -63,20 +63,18 @@ chmod +x install.sh
 
 ## 🔄 Updating
 
-To pull the latest updates on your Raspberry Pi (automatically resolving any local file-permission conflicts on `install.sh` / `launch.sh`) and restart the display service:
+To update an existing installation on your Raspberry Pi and restart the display service:
 
 ```bash
 cd ~/KlipperDisplayMoonraker
-git fetch origin
-git reset --hard origin/main
-chmod +x install.sh launch.sh uninstall.sh
+git pull
 sudo systemctl restart klipper-display 2>/dev/null || sudo systemctl restart klipperscreen
 ```
 
-Or as a single one-line command:
+*(If updating from an older version where `chmod +x` caused a local file-mode conflict, run this once to reset cleanly:)*
 
 ```bash
-cd ~/KlipperDisplayMoonraker && git fetch origin && git reset --hard origin/main && chmod +x install.sh launch.sh uninstall.sh && (sudo systemctl restart klipper-display 2>/dev/null || sudo systemctl restart klipperscreen)
+cd ~/KlipperDisplayMoonraker && git config core.fileMode false && git fetch origin && git reset --hard origin/main && (sudo systemctl restart klipper-display 2>/dev/null || sudo systemctl restart klipperscreen)
 ```
 
 ---
