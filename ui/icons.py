@@ -166,6 +166,18 @@ _SVG = {
         stroke-linecap="round"/>
   <path d="M32 10 V31" fill="none" stroke="url(#p)" stroke-width="6" stroke-linecap="round"/>
 </svg>""",
+
+    "estop": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="estop_grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EF4444"/>
+      <stop offset="1" stop-color="#B91C1C"/>
+    </linearGradient>
+  </defs>
+  <polygon points="19,5 45,5 59,19 59,45 45,59 19,59 5,45 5,19" fill="url(#estop_grad)" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="2.5"/>
+  <rect x="22" y="22" width="20" height="20" rx="3.5" fill="#FFFFFF"/>
+</svg>""",
 }
 
 
