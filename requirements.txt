@@ -1,0 +1,3 @@
+# Either binding works. On Raspberry Pi OS you can instead use:
+#   sudo apt install python3-pyqt6 python3-pyqt6.qtsvg
+PySide6>=6.5

@@ -1,0 +1,17 @@
+[Unit]
+Description=Klipper Touch Display Service
+After=network-online.target moonraker.service
+Wants=network-online.target moonraker.service
+
+[Service]
+Type=simple
+User=%USER%
+Environment=DISPLAY=:0
+WorkingDirectory=%DIR%
+ExecStart=/usr/bin/xinit /bin/bash %DIR%/launch.sh -- :0 vt7 -nocursor
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
