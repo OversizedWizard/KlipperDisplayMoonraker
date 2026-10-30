@@ -37,7 +37,7 @@ def format_size(bytes_val: int) -> str:
 
 class FileDetailsDialog(QtWidgets.QFrame):
     """Modal overlay displaying detailed metadata and Start Print action for a gcode file."""
-    start_print_requested = Signal(str)
+    start_print_requested = Signal(dict)
     closed = Signal()
 
     def __init__(self, file_info: dict, moonraker=None, scale: float = 1.0, parent=None):
@@ -248,8 +248,7 @@ class FileDetailsDialog(QtWidgets.QFrame):
             self.thumb_lbl.setPixmap(scaled)
 
     def _on_start_clicked(self):
-        fn = self.file_info.get("filename", "")
-        self.start_print_requested.emit(fn)
+        self.start_print_requested.emit(self.file_info)
         self.close()
 
     def close(self):
@@ -749,15 +748,25 @@ class FilesPage(QtWidgets.QWidget):
         dlg.show()
         dlg.raise_()
 
-    def _start_print(self, filename: str):
-        mr = self.moonraker or getattr(self.window(), "moonraker", None)
-        if mr:
-            full_fn = f"{self.current_dir.replace('gcodes/', '')}/{filename}" if self.current_dir != "gcodes" else filename
-            mr.start_print(full_fn)
-
+    def _start_print(self, file_info: dict):
         main_win = self.window()
+        mr = self.moonraker or getattr(main_win, "moonraker", None)
+
+        fn = file_info.get("filename", "")
+        clean_dir = self.current_dir.replace("gcodes/", "").replace("gcodes", "").strip("/")
+        full_fn = f"{clean_dir}/{fn}" if clean_dir else fn
+
+        # 1. Update PrintingPage immediately with thumbnail preview and metadata
+        if hasattr(main_win, "pages") and "printing" in main_win.pages:
+            main_win.pages["printing"].prepare_print(file_info)
+
+        # 2. Switch to PrintingPage immediately
         if hasattr(main_win, "show_page"):
             main_win.show_page("printing")
+
+        # 3. Request Moonraker to start printing
+        if mr:
+            mr.start_print(full_fn)
 
     def apply_scale(self, s: float):
         self._scale = s

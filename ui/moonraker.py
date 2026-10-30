@@ -474,8 +474,30 @@ class MoonrakerClient(QtCore.QObject):
 
     def start_print(self, filename: str, on_done=None):
         """Start printing a gcode file via Moonraker."""
-        enc_fn = urllib.parse.quote(filename)
-        self.post_endpoint(f"/printer/print/start?filename={enc_fn}", on_done=on_done, timeout=10.0)
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+        clean_fn = filename.replace("gcodes/", "").lstrip("/")
+        enc_fn = urllib.parse.quote(clean_fn)
+        body = json.dumps({"filename": clean_fn}).encode("utf-8")
+        url = f"http://{host}/printer/print/start?filename={enc_fn}"
+
+        def _run():
+            ok = False
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=body,
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=10.0) as resp:
+                    ok = (resp.status == 200)
+            except Exception as e:
+                print(f"[Moonraker] start_print error: {e}")
+                ok = False
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(ok))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def pause_print(self, on_done=None):
         """Pause active print."""

@@ -44,41 +44,74 @@ class CancelConfirmOverlay(QtWidgets.QFrame):
         outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         card = QtWidgets.QFrame(self)
+        card.setObjectName("CancelCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setStyleSheet(f"""
-            background: #0F172A;
-            border: 2px solid #EF4444;
-            border-radius: {_s(12, scale)}px;
-            padding: {_s(16, scale)}px;
+            QFrame#CancelCard {{
+                background: #0F172A;
+                border: 2px solid #EF4444;
+                border-radius: {_s(14, scale)}px;
+            }}
         """)
         c_lay = QtWidgets.QVBoxLayout(card)
+        c_lay.setContentsMargins(_s(24, scale), _s(18, scale), _s(24, scale), _s(18, scale))
         c_lay.setSpacing(_s(12, scale))
+        c_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         t = QtWidgets.QLabel("CANCEL ACTIVE PRINT?")
-        t.setStyleSheet(f"color: #EF4444; font-size: {_s(15, scale)}px; font-weight: 900;")
+        t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        t.setStyleSheet(f"color: #EF4444; font-size: {_s(16, scale)}px; font-weight: 900; letter-spacing: 0.5px;")
         c_lay.addWidget(t)
 
         msg = QtWidgets.QLabel("Are you sure you want to cancel and stop this print job?")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         msg.setStyleSheet(f"color: #CBD5E1; font-size: {_s(12, scale)}px;")
         c_lay.addWidget(msg)
 
         btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setSpacing(_s(12, scale))
+
         btn_no = QtWidgets.QPushButton("Keep Printing")
         btn_no.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_no.setFixedHeight(_s(40, scale))
-        btn_no.setStyleSheet(f"background: #334155; color: #F8FAFC; border-radius: {_s(6, scale)}px; font-weight: 700;")
+        btn_no.setFixedHeight(_s(42, scale))
+        btn_no.setStyleSheet(f"""
+            QPushButton {{
+                background: #334155;
+                color: #F8FAFC;
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: {_s(8, scale)}px;
+                font-size: {_s(12, scale)}px;
+                font-weight: 800;
+                padding: 0 {_s(14, scale)}px;
+            }}
+            QPushButton:hover {{ background: #475569; }}
+            QPushButton:pressed {{ background: #1E293B; }}
+        """)
         btn_no.clicked.connect(self.close)
 
-        btn_yes = QtWidgets.QPushButton("Cancel Print")
+        btn_yes = QtWidgets.QPushButton("Yes, Cancel Print")
         btn_yes.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_yes.setFixedHeight(_s(40, scale))
-        btn_yes.setStyleSheet(f"background: #EF4444; color: #FFFFFF; border-radius: {_s(6, scale)}px; font-weight: 900;")
+        btn_yes.setFixedHeight(_s(42, scale))
+        btn_yes.setStyleSheet(f"""
+            QPushButton {{
+                background: #EF4444;
+                color: #FFFFFF;
+                border: 1px solid #DC2626;
+                border-radius: {_s(8, scale)}px;
+                font-size: {_s(12, scale)}px;
+                font-weight: 900;
+                padding: 0 {_s(14, scale)}px;
+            }}
+            QPushButton:hover {{ background: #DC2626; }}
+            QPushButton:pressed {{ background: #B91C1C; }}
+        """)
         btn_yes.clicked.connect(self._on_confirm)
 
-        btn_row.addWidget(btn_no)
-        btn_row.addWidget(btn_yes)
+        btn_row.addWidget(btn_no, 1)
+        btn_row.addWidget(btn_yes, 1)
         c_lay.addLayout(btn_row)
 
-        card.setFixedWidth(_s(380, scale))
+        card.setFixedWidth(_s(420, scale))
         outer.addWidget(card)
 
     def _on_confirm(self):
@@ -399,15 +432,63 @@ class PrintingPage(QtWidgets.QWidget):
         right_layout.addWidget(self.actions_stack)
         main_layout.addWidget(self.right_card, 1)
 
+    def prepare_print(self, file_info: dict):
+        """Immediately preview the selected gcode file and show starting state."""
+        fn = file_info.get("filename") or file_info.get("full_path") or ""
+        self._current_filename = fn
+        self.filename_lbl.setText(fn)
+
+        self._print_state = "starting"
+        self.status_pill.setText("● STARTING")
+        self.status_pill.setStyleSheet("""
+            color: #F59E0B; background: rgba(245, 158, 11, 0.2);
+            border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+        """)
+
+        self.progress_bar.setValue(0)
+        self.pct_lbl.setText("0%")
+        self.el_val.setText("00:00:00")
+
+        est = file_info.get("estimated_time") or 0.0
+        self._estimated_total = float(est)
+        self.rem_val.setText(format_hms(est))
+        self.eta_val.setText("--:--")
+        self.layer_lbl.setText("Starting print...")
+
+        self.actions_stack.setCurrentIndex(0)
+        self.btn_pause.setText(" ⏸  PAUSE ")
+
+        # Load large thumbnail immediately
+        mr = getattr(self, "moonraker", None) or getattr(self.window(), "moonraker", None)
+        host = (mr.active_host or mr.hosts[0]) if (mr and mr.hosts) else "127.0.0.1:7125"
+
+        thumbs = file_info.get("thumbnails", [])
+        rel_p = thumbs[0].get("relative_path") if thumbs else None
+        dir_p = file_info.get("dir_path", "gcodes")
+
+        load_thumbnail_async(
+            host=host,
+            dir_path=dir_p,
+            thumb_rel_path=rel_p,
+            filename=fn,
+            target_size=_s(190, self._scale),
+            on_loaded=self._set_thumb
+        )
+
     def update_print_stats(self, st: dict):
         """Called whenever Moonraker emits print_stats_updated."""
         state = st.get("state", "standby")
+        fn = st.get("filename", "")
+
+        # If user just initiated a print and Klipper is preparing, keep the preview active
+        if self._print_state == "starting" and state == "standby" and not fn:
+            return
+
         self._print_state = state
         self._progress = float(st.get("progress", 0.0))
         self._print_duration = float(st.get("print_duration", 0.0))
         self._total_duration = float(st.get("total_duration", 0.0))
 
-        fn = st.get("filename", "")
         if fn and fn != self._current_filename:
             self._current_filename = fn
             self.filename_lbl.setText(fn)

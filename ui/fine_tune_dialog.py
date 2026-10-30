@@ -1,4 +1,4 @@
-"""Touch-friendly modal overlay for in-flight fine tuning (Z-offset babystep, temps, speed, flow, fan).
+"""Touch-friendly modal overlay for in-flight fine tuning (Z-offset babystep, speed, flow, fan).
 
 Renders directly within the MainWindow as a dimmed modal overlay with zero window-manager dependencies.
 """
@@ -29,8 +29,6 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
         # Local tracking state
         self._z_offset = 0.0
-        self._nozzle_tgt = 205.0
-        self._bed_tgt = 60.0
         self._speed_pct = 100
         self._flow_pct = 100
         self._fan_pct = 0
@@ -39,8 +37,6 @@ class FineTuneOverlay(QtWidgets.QFrame):
         if self._moonraker and hasattr(self._moonraker, "last_print_stats") and self._moonraker.last_print_stats:
             st = self._moonraker.last_print_stats
             self._z_offset = float(st.get("z_offset", 0.0))
-            self._nozzle_tgt = float(st.get("nozzle_tgt", 205.0))
-            self._bed_tgt = float(st.get("bed_tgt", 60.0))
             self._speed_pct = round(float(st.get("speed_factor", 1.0)) * 100)
             self._flow_pct = round(float(st.get("extrude_factor", 1.0)) * 100)
             self._fan_pct = round(float(st.get("fan_speed", 0.0)) * 100)
@@ -68,14 +64,14 @@ class FineTuneOverlay(QtWidgets.QFrame):
         # Header
         hdr = QtWidgets.QHBoxLayout()
         hdr_icon = QtWidgets.QLabel()
-        hdr_icon.setPixmap(icons.pixmap("tune", _s(26, scale)))
+        hdr_icon.setPixmap(icons.pixmap("tune", _s(24, scale)))
         hdr.addWidget(hdr_icon, 0, Qt.AlignmentFlag.AlignVCenter)
 
         title_box = QtWidgets.QVBoxLayout()
         title_box.setSpacing(1)
         t_lbl = QtWidgets.QLabel("FINE TUNE PRINT")
         t_lbl.setStyleSheet(f"color: #00E5FF; font-size: {_s(15, scale)}px; font-weight: 900; letter-spacing: 0.8px;")
-        sub_lbl = QtWidgets.QLabel("Live Z-Babystep, Temperatures & Speed Overrides")
+        sub_lbl = QtWidgets.QLabel("Live Z-Babystep, Speed, Flow & Fan Overrides")
         sub_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(10, scale)}px; font-weight: 600;")
         title_box.addWidget(t_lbl)
         title_box.addWidget(sub_lbl)
@@ -87,9 +83,9 @@ class FineTuneOverlay(QtWidgets.QFrame):
         close_btn.setFixedSize(_s(32, scale), _s(32, scale))
         close_btn.setStyleSheet(f"""
             QPushButton {{
-                background: rgba(255, 255, 255, 12);
+                background: rgba(255, 255, 255, 0.08);
                 color: #CBD5E1;
-                border: 1px solid rgba(255, 255, 255, 24);
+                border: 1px solid rgba(255, 255, 255, 0.15);
                 border-radius: {_s(16, scale)}px;
                 font-size: {_s(14, scale)}px;
                 font-weight: 800;
@@ -101,30 +97,29 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
         card_layout.addLayout(hdr)
 
-        # Tab / sections container (Grid layout for compact 800x480 fit)
-        grid = QtWidgets.QGridLayout()
-        grid.setHorizontalSpacing(_s(12, scale))
-        grid.setVerticalSpacing(_s(10, scale))
+        # Content container
+        content_box = QtWidgets.QVBoxLayout()
+        content_box.setSpacing(_s(10, scale))
 
         # --- Section 1: Z-Offset Babystepping ---
         z_box = QtWidgets.QFrame()
-        z_box.setStyleSheet(f"background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: {_s(10, scale)}px; padding: {_s(4, scale)}px;")
+        z_box.setStyleSheet(f"background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: {_s(10, scale)}px;")
         z_lay = QtWidgets.QVBoxLayout(z_box)
-        z_lay.setContentsMargins(_s(8, scale), _s(6, scale), _s(8, scale), _s(6, scale))
-        z_lay.setSpacing(_s(6, scale))
+        z_lay.setContentsMargins(_s(12, scale), _s(8, scale), _s(12, scale), _s(8, scale))
+        z_lay.setSpacing(_s(8, scale))
 
         z_title_row = QtWidgets.QHBoxLayout()
         z_title = QtWidgets.QLabel("Z-OFFSET BABYSTEP")
         z_title.setStyleSheet(f"color: #F8FAFC; font-size: {_s(11, scale)}px; font-weight: 800;")
         self.z_val_lbl = QtWidgets.QLabel(f"{self._z_offset:+.3f} mm")
-        self.z_val_lbl.setStyleSheet(f"color: #00E5FF; font-size: {_s(12, scale)}px; font-weight: 900; font-family: monospace;")
+        self.z_val_lbl.setStyleSheet(f"color: #00E5FF; font-size: {_s(13, scale)}px; font-weight: 900; font-family: monospace;")
         z_title_row.addWidget(z_title)
         z_title_row.addStretch(1)
         z_title_row.addWidget(self.z_val_lbl)
         z_lay.addLayout(z_title_row)
 
         z_btn_row = QtWidgets.QHBoxLayout()
-        z_btn_row.setSpacing(_s(6, scale))
+        z_btn_row.setSpacing(_s(8, scale))
         for delta, label in [(-0.05, "▼ -0.05"), (-0.01, "▼ -0.01"), (+0.01, "▲ +0.01"), (+0.05, "▲ +0.05")]:
             btn = QtWidgets.QPushButton(label)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -133,85 +128,28 @@ class FineTuneOverlay(QtWidgets.QFrame):
             btn.clicked.connect(lambda ch, d=delta: self._on_z_adjust(d))
             z_btn_row.addWidget(btn)
         z_lay.addLayout(z_btn_row)
-        grid.addWidget(z_box, 0, 0, 1, 2)
+        content_box.addWidget(z_box)
 
-        # --- Section 2: Nozzle & Bed Temperature Adjust ---
-        # Nozzle
-        noz_box = QtWidgets.QFrame()
-        noz_box.setStyleSheet(f"background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: {_s(10, scale)}px;")
-        noz_lay = QtWidgets.QVBoxLayout(noz_box)
-        noz_lay.setContentsMargins(_s(8, scale), _s(6, scale), _s(8, scale), _s(6, scale))
-        noz_lay.setSpacing(_s(6, scale))
-        noz_row1 = QtWidgets.QHBoxLayout()
-        noz_title = QtWidgets.QLabel("HOTEND TARGET")
-        noz_title.setStyleSheet(f"color: #F8FAFC; font-size: {_s(11, scale)}px; font-weight: 800;")
-        self.noz_val_lbl = QtWidgets.QLabel(f"{self._nozzle_tgt:.0f}°C")
-        self.noz_val_lbl.setStyleSheet(f"color: #FF9A3C; font-size: {_s(12, scale)}px; font-weight: 900; font-family: monospace;")
-        noz_row1.addWidget(noz_title)
-        noz_row1.addStretch(1)
-        noz_row1.addWidget(self.noz_val_lbl)
-        noz_lay.addLayout(noz_row1)
-
-        noz_btns = QtWidgets.QHBoxLayout()
-        noz_btns.setSpacing(_s(4, scale))
-        for diff, lbl in [(-5, "-5°"), (-1, "-1°"), (+1, "+1°"), (+5, "+5°")]:
-            b = QtWidgets.QPushButton(lbl)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(_s(30, scale))
-            b.setStyleSheet(self._btn_style(scale, is_accent=(diff > 0)))
-            b.clicked.connect(lambda ch, d=diff: self._on_temp_adjust("extruder", d))
-            noz_btns.addWidget(b)
-        noz_lay.addLayout(noz_btns)
-        grid.addWidget(noz_box, 1, 0)
-
-        # Bed
-        bed_box = QtWidgets.QFrame()
-        bed_box.setStyleSheet(f"background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: {_s(10, scale)}px;")
-        bed_lay = QtWidgets.QVBoxLayout(bed_box)
-        bed_lay.setContentsMargins(_s(8, scale), _s(6, scale), _s(8, scale), _s(6, scale))
-        bed_lay.setSpacing(_s(6, scale))
-        bed_row1 = QtWidgets.QHBoxLayout()
-        bed_title = QtWidgets.QLabel("BED TARGET")
-        bed_title.setStyleSheet(f"color: #F8FAFC; font-size: {_s(11, scale)}px; font-weight: 800;")
-        self.bed_val_lbl = QtWidgets.QLabel(f"{self._bed_tgt:.0f}°C")
-        self.bed_val_lbl.setStyleSheet(f"color: #00E5FF; font-size: {_s(12, scale)}px; font-weight: 900; font-family: monospace;")
-        bed_row1.addWidget(bed_title)
-        bed_row1.addStretch(1)
-        bed_row1.addWidget(self.bed_val_lbl)
-        bed_lay.addLayout(bed_row1)
-
-        bed_btns = QtWidgets.QHBoxLayout()
-        bed_btns.setSpacing(_s(4, scale))
-        for diff, lbl in [(-5, "-5°"), (-1, "-1°"), (+1, "+1°"), (+5, "+5°")]:
-            b = QtWidgets.QPushButton(lbl)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(_s(30, scale))
-            b.setStyleSheet(self._btn_style(scale, is_accent=(diff > 0)))
-            b.clicked.connect(lambda ch, d=diff: self._on_temp_adjust("heater_bed", d))
-            bed_btns.addWidget(b)
-        bed_lay.addLayout(bed_btns)
-        grid.addWidget(bed_box, 1, 1)
-
-        # --- Section 3: Speed, Flow & Fan ---
+        # --- Section 2: Speed, Flow & Fan Overrides ---
         sf_box = QtWidgets.QFrame()
         sf_box.setStyleSheet(f"background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: {_s(10, scale)}px;")
         sf_lay = QtWidgets.QVBoxLayout(sf_box)
-        sf_lay.setContentsMargins(_s(8, scale), _s(6, scale), _s(8, scale), _s(6, scale))
-        sf_lay.setSpacing(_s(6, scale))
+        sf_lay.setContentsMargins(_s(12, scale), _s(10, scale), _s(12, scale), _s(10, scale))
+        sf_lay.setSpacing(_s(8, scale))
 
         # Speed Row
         spd_row = QtWidgets.QHBoxLayout()
-        spd_lbl = QtWidgets.QLabel("PRINT SPEED (FEEDRATE):")
+        spd_lbl = QtWidgets.QLabel("PRINT SPEED:")
         spd_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 700;")
         self.spd_val_lbl = QtWidgets.QLabel(f"{self._speed_pct}%")
-        self.spd_val_lbl.setStyleSheet(f"color: #38BDF8; font-size: {_s(11, scale)}px; font-weight: 900;")
+        self.spd_val_lbl.setStyleSheet(f"color: #38BDF8; font-size: {_s(12, scale)}px; font-weight: 900;")
         spd_row.addWidget(spd_lbl)
         spd_row.addWidget(self.spd_val_lbl)
         spd_row.addStretch(1)
         for diff, lbl in [(-10, "-10%"), (-5, "-5%"), (100, "100%"), (+5, "+5%"), (+10, "+10%")]:
             b = QtWidgets.QPushButton(lbl)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(_s(28, scale))
+            b.setFixedHeight(_s(30, scale))
             b.setStyleSheet(self._btn_style(scale, is_accent=(diff == 100)))
             b.clicked.connect(lambda ch, d=diff: self._on_speed_adjust(d))
             spd_row.addWidget(b)
@@ -222,14 +160,14 @@ class FineTuneOverlay(QtWidgets.QFrame):
         flow_lbl = QtWidgets.QLabel("EXTRUSION FLOW:")
         flow_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 700;")
         self.flow_val_lbl = QtWidgets.QLabel(f"{self._flow_pct}%")
-        self.flow_val_lbl.setStyleSheet(f"color: #34D399; font-size: {_s(11, scale)}px; font-weight: 900;")
+        self.flow_val_lbl.setStyleSheet(f"color: #34D399; font-size: {_s(12, scale)}px; font-weight: 900;")
         flow_row.addWidget(flow_lbl)
         flow_row.addWidget(self.flow_val_lbl)
         flow_row.addStretch(1)
         for diff, lbl in [(-5, "-5%"), (-1, "-1%"), (100, "100%"), (+1, "+1%"), (+5, "+5%")]:
             b = QtWidgets.QPushButton(lbl)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(_s(28, scale))
+            b.setFixedHeight(_s(30, scale))
             b.setStyleSheet(self._btn_style(scale, is_accent=(diff == 100)))
             b.clicked.connect(lambda ch, d=diff: self._on_flow_adjust(d))
             flow_row.addWidget(b)
@@ -237,25 +175,24 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
         # Fan Row
         fan_row = QtWidgets.QHBoxLayout()
-        fan_lbl = QtWidgets.QLabel("PART COOLING FAN:")
+        fan_lbl = QtWidgets.QLabel("COOLING FAN:")
         fan_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 700;")
         self.fan_val_lbl = QtWidgets.QLabel(f"{self._fan_pct}%")
-        self.fan_val_lbl.setStyleSheet(f"color: #C084FC; font-size: {_s(11, scale)}px; font-weight: 900;")
+        self.fan_val_lbl.setStyleSheet(f"color: #C084FC; font-size: {_s(12, scale)}px; font-weight: 900;")
         fan_row.addWidget(fan_lbl)
         fan_row.addWidget(self.fan_val_lbl)
         fan_row.addStretch(1)
         for pct, lbl in [(0, "OFF"), (25, "25%"), (50, "50%"), (75, "75%"), (100, "100%")]:
             b = QtWidgets.QPushButton(lbl)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(_s(28, scale))
+            b.setFixedHeight(_s(30, scale))
             b.setStyleSheet(self._btn_style(scale, is_accent=(pct == self._fan_pct)))
             b.clicked.connect(lambda ch, p=pct: self._on_fan_set(p))
             fan_row.addWidget(b)
         sf_lay.addLayout(fan_row)
 
-        grid.addWidget(sf_box, 2, 0, 1, 2)
-
-        card_layout.addLayout(grid)
+        content_box.addWidget(sf_box)
+        card_layout.addLayout(content_box)
 
         # Done button
         done_btn = QtWidgets.QPushButton("DONE / CLOSE")
@@ -283,7 +220,7 @@ class FineTuneOverlay(QtWidgets.QFrame):
         card_layout.addWidget(done_btn)
 
         outer.addWidget(self.card)
-        self.card.setFixedWidth(_s(540, scale))
+        self.card.setFixedWidth(_s(500, scale))
 
     def _btn_style(self, scale: float, is_accent: bool = False) -> str:
         if is_accent:
@@ -295,7 +232,7 @@ class FineTuneOverlay(QtWidgets.QFrame):
                     border-radius: {_s(6, scale)}px;
                     font-size: {_s(11, scale)}px;
                     font-weight: 800;
-                    padding: 0 {_s(8, scale)}px;
+                    padding: 0 {_s(10, scale)}px;
                 }}
                 QPushButton:hover {{
                     background: rgba(0, 229, 255, 0.35);
@@ -315,7 +252,7 @@ class FineTuneOverlay(QtWidgets.QFrame):
                     border-radius: {_s(6, scale)}px;
                     font-size: {_s(11, scale)}px;
                     font-weight: 700;
-                    padding: 0 {_s(8, scale)}px;
+                    padding: 0 {_s(10, scale)}px;
                 }}
                 QPushButton:hover {{
                     background: rgba(255, 255, 255, 0.16);
@@ -331,18 +268,6 @@ class FineTuneOverlay(QtWidgets.QFrame):
         self.z_val_lbl.setText(f"{self._z_offset:+.3f} mm")
         if self._moonraker:
             self._moonraker.adjust_z_offset(delta)
-
-    def _on_temp_adjust(self, heater: str, diff: float):
-        if heater == "extruder":
-            self._nozzle_tgt = max(0.0, min(320.0, self._nozzle_tgt + diff))
-            self.noz_val_lbl.setText(f"{self._nozzle_tgt:.0f}°C")
-            if self._moonraker:
-                self._moonraker.set_temperature("extruder", self._nozzle_tgt)
-        else:
-            self._bed_tgt = max(0.0, min(140.0, self._bed_tgt + diff))
-            self.bed_val_lbl.setText(f"{self._bed_tgt:.0f}°C")
-            if self._moonraker:
-                self._moonraker.set_temperature("heater_bed", self._bed_tgt)
 
     def _on_speed_adjust(self, val: int):
         if val == 100:
@@ -374,4 +299,3 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
     def mousePressEvent(self, event):
         event.accept()
-
