@@ -23,6 +23,7 @@ class PowerActionCard(QtWidgets.QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(0)
 
         self._layout = QtWidgets.QHBoxLayout(self)
 
@@ -31,7 +32,8 @@ class PowerActionCard(QtWidgets.QFrame):
         self._layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
         mid = QtWidgets.QVBoxLayout()
-        mid.setSpacing(2)
+        mid.setSpacing(1)
+        mid.setContentsMargins(0, 0, 0, 0)
 
         self.title_label = QtWidgets.QLabel(title)
         self.title_label.setObjectName("CalTitle")
@@ -41,15 +43,22 @@ class PowerActionCard(QtWidgets.QFrame):
 
         self.sub_label = QtWidgets.QLabel(subtitle)
         self.sub_label.setObjectName("CalDesc")
+        self.sub_label.setStyleSheet("color: #94A3B8; font-size: 11px;")
         mid.addWidget(self.sub_label)
 
         cmd_row = QtWidgets.QHBoxLayout()
+        cmd_row.setContentsMargins(0, 2, 0, 0)
         self.badge_lbl = QtWidgets.QLabel(badge)
         self.badge_lbl.setObjectName("CalCmdBadge")
         if is_danger:
             self.badge_lbl.setStyleSheet(
                 "background: rgba(239, 68, 68, 0.22); color: #FCA5A5; "
-                "border: 1px solid rgba(239, 68, 68, 0.55); font-weight: 800; border-radius: 6px;"
+                "border: 1px solid rgba(239, 68, 68, 0.55); font-weight: 800; border-radius: 4px; padding: 1px 6px; font-size: 10px;"
+            )
+        else:
+            self.badge_lbl.setStyleSheet(
+                "background: rgba(0, 229, 255, 0.12); color: #00E5FF; "
+                "border: 1px solid rgba(0, 229, 255, 0.35); font-weight: 700; border-radius: 4px; padding: 1px 6px; font-size: 10px;"
             )
         cmd_row.addWidget(self.badge_lbl)
         cmd_row.addStretch(1)
@@ -60,7 +69,9 @@ class PowerActionCard(QtWidgets.QFrame):
         self.arrow = QtWidgets.QLabel("›")
         self.arrow.setObjectName("CalCardArrow")
         if is_danger:
-            self.arrow.setStyleSheet("color: #EF4444; font-weight: 800;")
+            self.arrow.setStyleSheet("color: #EF4444; font-weight: 800; font-size: 16px;")
+        else:
+            self.arrow.setStyleSheet("color: #00E5FF; font-weight: 700; font-size: 16px;")
         self._layout.addWidget(self.arrow, 0, Qt.AlignmentFlag.AlignVCenter)
 
     def mousePressEvent(self, event):
@@ -71,12 +82,11 @@ class PowerActionCard(QtWidgets.QFrame):
             super().mousePressEvent(event)
 
     def apply_scale(self, s: float):
-        m = _s(12, s)
-        self._layout.setContentsMargins(m, _s(8, s), m, _s(8, s))
-        self._layout.setSpacing(_s(10, s))
-        self.setMinimumHeight(_s(72, s))
-        self.icon_label.setPixmap(icons.pixmap(self.icon_name, _s(38, s)))
-        self.icon_label.setFixedSize(_s(42, s), _s(42, s))
+        self._layout.setContentsMargins(_s(10, s), _s(6, s), _s(10, s), _s(6, s))
+        self._layout.setSpacing(_s(8, s))
+        self.setFixedHeight(_s(66, s))
+        self.icon_label.setPixmap(icons.pixmap(self.icon_name, _s(32, s)))
+        self.icon_label.setFixedSize(_s(36, s), _s(36, s))
 
 
 class PowerPage(QtWidgets.QWidget):
@@ -102,25 +112,29 @@ class PowerPage(QtWidgets.QWidget):
         self.container.setObjectName("CalContainer")
         self.container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.vbox = QtWidgets.QVBoxLayout(self.container)
+        self.vbox.setContentsMargins(10, 6, 18, 10)
+        self.vbox.setSpacing(6)
 
         self.headers = []
         self.cards = []
 
-        # Single unified grid so columns 0 and 1 are exactly 50% width each
+        # Single unified grid: columns 0 and 1 are strictly equal 50% width
         self.grid = QtWidgets.QGridLayout()
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.grid.setHorizontalSpacing(8)
+        self.grid.setVerticalSpacing(8)
         self.grid.setColumnStretch(0, 1)
         self.grid.setColumnStretch(1, 1)
 
         # --- Section 1: Klipper Restarts ---
-        sec1 = QtWidgets.QLabel("KLIPPER SERVICE & FIRMWARE RESTART")
+        sec1 = QtWidgets.QLabel("KLIPPER SERVICE & HARDWARE")
         sec1.setObjectName("SettingsSecHeader")
         self.grid.addWidget(sec1, 0, 0, 1, 2)
         self.headers.append(sec1)
 
         self.klipper_restart_card = PowerActionCard(
             "reload", "Klipper Restart",
-            "Reload Python host service & config without resetting MCU.",
+            "Reload Python service & config.",
             "RESTART",
             on_click=self._on_klipper_restart
         )
@@ -129,8 +143,8 @@ class PowerPage(QtWidgets.QWidget):
 
         self.fw_restart_card = PowerActionCard(
             "restart", "Firmware Restart",
-            "Reload Klipper config and reconnect MCU hardware.",
-            "FIRMWARE_RESTART",
+            "Reload config & reconnect MCU.",
+            "FIRMWARE",
             on_click=self._on_fw_restart
         )
         self.grid.addWidget(self.fw_restart_card, 1, 1)
@@ -169,7 +183,7 @@ class PowerPage(QtWidgets.QWidget):
 
         self.m112_card = PowerActionCard(
             "power", "Emergency Stop",
-            "Immediately halt all motors and shut down all heaters (M112).",
+            "Immediately halt all motors & heaters (M112).",
             "M112",
             on_click=self._on_emergency_stop,
             is_danger=True
@@ -203,7 +217,7 @@ class PowerPage(QtWidgets.QWidget):
             ])
 
     def _on_fw_restart(self, tile: PowerActionCard):
-        tile.sub_label.setText("Restarting Klipper MCU hardware...")
+        tile.sub_label.setText("Restarting MCU hardware...")
         tile.badge_lbl.setText("RESTARTING...")
         mr = getattr(self.window(), "moonraker", None)
         if mr and mr.connected:
@@ -277,12 +291,13 @@ class PowerPage(QtWidgets.QWidget):
 
     def apply_scale(self, s: float):
         self._scale = s
-        m = _s(14, s)
-        self.vbox.setContentsMargins(m, m, m, m)
-        self.vbox.setSpacing(_s(8, s))
-        self.grid.setHorizontalSpacing(_s(12, s))
-        self.grid.setVerticalSpacing(_s(10, s))
+        m = _s(10, s)
+        right_pad = _s(18, s)
+        self.vbox.setContentsMargins(m, _s(6, s), right_pad, _s(10, s))
+        self.vbox.setSpacing(_s(6, s))
+        self.grid.setHorizontalSpacing(_s(8, s))
+        self.grid.setVerticalSpacing(_s(8, s))
         for h in self.headers:
-            h.setStyleSheet(f"font-size: {_s(11, s)}px; font-weight: 800; letter-spacing: 0.8px; color: #94A3B8; margin-top: {_s(6, s)}px; margin-bottom: {_s(2, s)}px;")
+            h.setStyleSheet(f"font-size: {_s(11, s)}px; font-weight: 800; letter-spacing: 0.8px; color: #94A3B8; margin-top: {_s(4, s)}px; margin-bottom: {_s(1, s)}px;")
         for card in self.cards:
             card.apply_scale(s)
