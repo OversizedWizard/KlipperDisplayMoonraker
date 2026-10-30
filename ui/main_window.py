@@ -320,6 +320,8 @@ class MainWindow(QtWidgets.QWidget):
         self.moonraker.config_loaded.connect(self._on_config_loaded)
         self.moonraker.firmware_info_updated.connect(self.pages["settings"].update_firmware_info)
         self.moonraker.temps_updated.connect(self.pages["home"].update_temps)
+        if "printing" in self.pages and hasattr(self.pages["printing"], "update_temps"):
+            self.moonraker.temps_updated.connect(self.pages["printing"].update_temps)
         self.moonraker.coords_updated.connect(self.pages["home"].update_coords)
         self.moonraker.load_cell_updated.connect(self.topbar.set_probe_force)
         self.moonraker.print_stats_updated.connect(self._on_print_stats_updated)
@@ -352,6 +354,14 @@ class MainWindow(QtWidgets.QWidget):
         self.topbar.set_connection(connected, host, klippy_state)
         if hasattr(self.pages["settings"], "update_connection"):
             self.pages["settings"].update_connection(connected, host, klippy_state)
+        if connected and klippy_state == "ready":
+            last_state = getattr(self, "_last_klippy_state", "")
+            if last_state != "ready":
+                if hasattr(self.pages.get("home"), "_check_mesh_config"):
+                    self.pages["home"]._check_mesh_config()
+            self._last_klippy_state = "ready"
+        else:
+            self._last_klippy_state = klippy_state
         if not connected:
             self.topbar.set_load_cell_visible(False)
 

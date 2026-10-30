@@ -379,7 +379,7 @@ class HomePage(QtWidgets.QWidget):
         self.btn_home_all.clicked.connect(self._on_home_all)
         self.bottom_bar.addWidget(self.btn_home_all, 1)
 
-        self.btn_bed_mesh = QtWidgets.QPushButton("⊞  Bed Levelling")
+        self.btn_bed_mesh = QtWidgets.QPushButton("⊞  Bed Levelling Off")
         self.btn_bed_mesh.setObjectName("BedMeshBtn")
         self.btn_bed_mesh.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_bed_mesh.clicked.connect(self._on_toggle_bed_mesh)
@@ -495,8 +495,18 @@ class HomePage(QtWidgets.QWidget):
         mr = getattr(main_win, "moonraker", None)
         if mr:
             mr.check_start_gcode_mesh(on_done=self._on_mesh_checked)
+        else:
+            QtCore.QTimer.singleShot(1000, self._check_mesh_config)
 
     def _on_mesh_checked(self, is_enabled: bool, is_configured: bool):
+        main_win = self.window()
+        mr = getattr(main_win, "moonraker", None)
+        if not is_configured and not is_enabled:
+            # If not yet connected / ready on reboot, retry
+            if not mr or not mr.connected or mr.klippy_state != "ready":
+                QtCore.QTimer.singleShot(1500, self._check_mesh_config)
+                return
+
         self._mesh_active = is_enabled
         self._mesh_configured = is_configured
         self._update_mesh_button_ui()
@@ -530,6 +540,7 @@ class HomePage(QtWidgets.QWidget):
         def _done(new_state: bool):
             self._mesh_active = new_state
             self._update_mesh_button_ui()
+            QtCore.QTimer.singleShot(3500, self._check_mesh_config)
 
         mr.toggle_start_gcode_mesh(on_done=_done)
 
@@ -567,7 +578,7 @@ class HomePage(QtWidgets.QWidget):
                 }}
             """)
         else:
-            self.btn_bed_mesh.setText("⊞  Bed Levelling")
+            self.btn_bed_mesh.setText("⊞  Bed Levelling Off")
             self.btn_bed_mesh.setStyleSheet(f"""
                 QPushButton#BedMeshBtn {{
                     background: rgba(239, 68, 68, 0.16);

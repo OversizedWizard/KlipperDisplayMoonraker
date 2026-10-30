@@ -752,9 +752,10 @@ class FilesPage(QtWidgets.QWidget):
         main_win = self.window()
         mr = self.moonraker or getattr(main_win, "moonraker", None)
 
-        fn = file_info.get("filename", "")
+        fn = file_info.get("filename", "") or file_info.get("path", "")
         clean_dir = self.current_dir.replace("gcodes/", "").replace("gcodes", "").strip("/")
         full_fn = f"{clean_dir}/{fn}" if clean_dir else fn
+        clean_full_fn = full_fn.replace("gcodes/", "").lstrip("/")
 
         # 1. Update PrintingPage immediately with thumbnail preview and metadata
         if hasattr(main_win, "pages") and "printing" in main_win.pages:
@@ -764,9 +765,9 @@ class FilesPage(QtWidgets.QWidget):
         if hasattr(main_win, "show_page"):
             main_win.show_page("printing")
 
-        # 3. Request Moonraker to start printing
+        # 3. Request Moonraker to start printing immediately
         if mr:
-            mr.start_print(full_fn)
+            mr.start_print(clean_full_fn)
 
     def apply_scale(self, s: float):
         self._scale = s

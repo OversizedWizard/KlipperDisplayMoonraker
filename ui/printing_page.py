@@ -287,24 +287,48 @@ class PrintingPage(QtWidgets.QWidget):
 
         right_layout.addLayout(time_grid)
 
-        # Live Temperatures & Fan Info Strip
-        info_strip = QtWidgets.QHBoxLayout()
-        info_strip.setSpacing(12)
+        # Live Metrics List (Vertical rows instead of side-by-side)
+        self.stats_list_widget = QtWidgets.QWidget()
+        self.stats_list_layout = QtWidgets.QVBoxLayout(self.stats_list_widget)
+        self.stats_list_layout.setContentsMargins(0, 4, 0, 4)
+        self.stats_list_layout.setSpacing(5)
 
-        self.noz_lbl = QtWidgets.QLabel("Nozzle: 0.0°C / 0°C")
-        self.noz_lbl.setStyleSheet("color: #FF9A3C; font-size: 11px; font-weight: 700;")
-        info_strip.addWidget(self.noz_lbl)
+        def _make_metric_row(icon: str, label: str, default_val: str, val_col: str):
+            row = QtWidgets.QFrame()
+            row.setStyleSheet("""
+                QFrame {
+                    background: rgba(255, 255, 255, 0.035);
+                    border: 1px solid rgba(255, 255, 255, 0.07);
+                    border-radius: 7px;
+                }
+            """)
+            r_lay = QtWidgets.QHBoxLayout(row)
+            r_lay.setContentsMargins(10, 4, 10, 4)
+            r_lay.setSpacing(8)
 
-        self.bed_lbl = QtWidgets.QLabel("Bed: 0.0°C / 0°C")
-        self.bed_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 700;")
-        info_strip.addWidget(self.bed_lbl)
+            lbl_title = QtWidgets.QLabel(f"{icon}  {label}")
+            lbl_title.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 700; background: transparent; border: none;")
+            r_lay.addWidget(lbl_title)
+            r_lay.addStretch(1)
 
-        info_strip.addStretch(1)
+            lbl_val = QtWidgets.QLabel(default_val)
+            lbl_val.setStyleSheet(f"color: {val_col}; font-size: 12px; font-weight: 800; font-family: monospace; background: transparent; border: none;")
+            r_lay.addWidget(lbl_val)
+            return row, lbl_val
 
-        self.rates_lbl = QtWidgets.QLabel("Spd: 100%  •  Flow: 100%")
-        self.rates_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 600;")
-        info_strip.addWidget(self.rates_lbl)
-        right_layout.addLayout(info_strip)
+        self.row_noz, self.noz_lbl = _make_metric_row("♨️", "Nozzle", "0.0°C / 0°C", "#FF9A3C")
+        self.row_bed, self.bed_lbl = _make_metric_row("🛏️", "Bed", "0.0°C / 0°C", "#00E5FF")
+        self.row_spd, self.spd_lbl = _make_metric_row("⚡", "Speed", "100%", "#38BDF8")
+        self.row_flow, self.flow_lbl = _make_metric_row("💧", "Flow", "100%", "#34D399")
+        self.row_fan, self.fan_lbl = _make_metric_row("🌀", "Fan", "0%", "#A78BFA")
+        self.rates_lbl = self.spd_lbl
+
+        self.stats_list_layout.addWidget(self.row_noz)
+        self.stats_list_layout.addWidget(self.row_bed)
+        self.stats_list_layout.addWidget(self.row_spd)
+        self.stats_list_layout.addWidget(self.row_flow)
+        self.stats_list_layout.addWidget(self.row_fan)
+        right_layout.addWidget(self.stats_list_widget)
 
         right_layout.addStretch(1)
 
@@ -486,29 +510,43 @@ class PrintingPage(QtWidgets.QWidget):
             on_loaded=self._set_thumb
         )
 
+    def update_temps(self, noz_cur: float, noz_tgt: float, bed_cur: float, bed_tgt: float):
+        """Called live from Moonraker polling to update temperatures smoothly."""
+        if hasattr(self, "noz_lbl"):
+            self.noz_lbl.setText(f"{noz_cur:.1f}°C / {noz_tgt:.0f}°C")
+        if hasattr(self, "bed_lbl"):
+            self.bed_lbl.setText(f"{bed_cur:.1f}°C / {bed_tgt:.0f}°C")
+
     def update_print_stats(self, st: dict):
         """Called whenever Moonraker emits print_stats_updated."""
-        state = st.get("state", "standby")
+        raw_state = str(st.get("state", "standby")).lower()
+        state = raw_state
         fn = st.get("filename", "")
 
-        # If user just initiated a print and Klipper is preparing, keep the preview active
-        if self._print_state == "starting" and state == "standby" and not fn:
-            # Still update temps even while waiting for Klipper state transition!
-            n_cur = st.get("nozzle_cur", 0.0)
-            n_tgt = st.get("nozzle_tgt", 0.0)
-            b_cur = st.get("bed_cur", 0.0)
-            b_tgt = st.get("bed_tgt", 0.0)
-            self.noz_lbl.setText(f"Nozzle: {n_cur:.1f}°C / {n_tgt:.0f}°C")
-            self.bed_lbl.setText(f"Bed: {b_cur:.1f}°C / {b_tgt:.0f}°C")
-            if b_tgt > 35 and b_cur < b_tgt - 1.5:
-                self.status_pill.setText(f"🔥 HEATING BED ({b_cur:.0f}/{b_tgt:.0f}°C)")
-                self.status_pill.setStyleSheet("color: #FF9A3C; background: rgba(255, 154, 60, 0.20); border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
-                self.layer_lbl.setText(f"🔥 Heating Bed to {b_tgt:.0f}°C (current: {b_cur:.1f}°C)")
-            elif n_tgt > 140 and n_cur < n_tgt - 2.5:
-                self.status_pill.setText(f"🔥 HEATING NOZZLE ({n_cur:.0f}/{n_tgt:.0f}°C)")
-                self.status_pill.setStyleSheet("color: #FB923C; background: rgba(251, 146, 60, 0.20); border: 1px solid #FB923C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
-                self.layer_lbl.setText(f"🔥 Heating Nozzle to {n_tgt:.0f}°C (current: {n_cur:.1f}°C)")
-            return
+        # If user just initiated a print and Klipper is preparing/heating, keep "starting" state active
+        if self._print_state == "starting" and state in ("standby", "ready"):
+            state = "starting"
+
+        # Temps
+        n_cur = st.get("nozzle_cur", 0.0)
+        n_tgt = st.get("nozzle_tgt", 0.0)
+        b_cur = st.get("bed_cur", 0.0)
+        b_tgt = st.get("bed_tgt", 0.0)
+        if hasattr(self, "noz_lbl"):
+            self.noz_lbl.setText(f"{n_cur:.1f}°C / {n_tgt:.0f}°C")
+        if hasattr(self, "bed_lbl"):
+            self.bed_lbl.setText(f"{b_cur:.1f}°C / {b_tgt:.0f}°C")
+
+        # Speeds, Flow, Fan
+        spd = round(float(st.get("speed_factor", 1.0)) * 100)
+        flow = round(float(st.get("extrude_factor", 1.0)) * 100)
+        fan = round(float(st.get("fan_speed", 0.0)) * 100)
+        if hasattr(self, "spd_lbl"):
+            self.spd_lbl.setText(f"{spd}%")
+        if hasattr(self, "flow_lbl"):
+            self.flow_lbl.setText(f"{flow}%")
+        if hasattr(self, "fan_lbl"):
+            self.fan_lbl.setText(f"{fan}%")
 
         self._print_state = state
         self._progress = float(st.get("progress", 0.0))
@@ -547,8 +585,10 @@ class PrintingPage(QtWidgets.QWidget):
         n_tgt = st.get("nozzle_tgt", 0.0)
         b_cur = st.get("bed_cur", 0.0)
         b_tgt = st.get("bed_tgt", 0.0)
-        self.noz_lbl.setText(f"Nozzle: {n_cur:.1f}°C / {n_tgt:.0f}°C")
-        self.bed_lbl.setText(f"Bed: {b_cur:.1f}°C / {b_tgt:.0f}°C")
+        if hasattr(self, "noz_lbl"):
+            self.noz_lbl.setText(f"{n_cur:.1f}°C / {n_tgt:.0f}°C")
+        if hasattr(self, "bed_lbl"):
+            self.bed_lbl.setText(f"{b_cur:.1f}°C / {b_tgt:.0f}°C")
 
         # Determine Heating & Current Activity Status
         bed_heating = (b_tgt > 35.0 and b_cur < (b_tgt - 1.5))
@@ -580,7 +620,12 @@ class PrintingPage(QtWidgets.QWidget):
         spd = round(float(st.get("speed_factor", 1.0)) * 100)
         flow = round(float(st.get("extrude_factor", 1.0)) * 100)
         fan = round(float(st.get("fan_speed", 0.0)) * 100)
-        self.rates_lbl.setText(f"Spd: {spd}% • Flow: {flow}% • Fan: {fan}%")
+        if hasattr(self, "spd_lbl"):
+            self.spd_lbl.setText(f"{spd}%")
+        if hasattr(self, "flow_lbl"):
+            self.flow_lbl.setText(f"{flow}%")
+        if hasattr(self, "fan_lbl"):
+            self.fan_lbl.setText(f"{fan}%")
 
         z_off = float(st.get("z_offset", 0.0))
         self.babystep_lbl.setText(f"Z-Offset: {z_off:+.3f} mm")

@@ -148,6 +148,9 @@ class MoonrakerClient(QtCore.QObject):
                         self.connected = True
                         self.klippy_state = k_state
 
+                        if k_state != "ready":
+                            self._config_fetched = False
+
                         # If connected and config not yet fetched, fetch Klipper config in background
                         if not self._config_fetched and k_state == "ready":
                             self._config_fetched = True
@@ -246,7 +249,9 @@ class MoonrakerClient(QtCore.QObject):
         try:
             cfg_data = self._fetch_json(host, "/printer/objects/query?configfile", timeout=2.5)
             if cfg_data and "result" in cfg_data:
-                cfg_found = cfg_data["result"].get("status", {}).get("configfile", {}).get("settings", {})
+                res_cf = cfg_data["result"].get("status", {}).get("configfile", {})
+                cfg_found = res_cf.get("settings", {})
+                self.raw_config = res_cf.get("config", {})
         except Exception:
             pass
 
@@ -510,27 +515,40 @@ class MoonrakerClient(QtCore.QObject):
         threading.Thread(target=_run, daemon=True).start()
 
     def start_print(self, filename: str, on_done=None):
-        """Start printing a gcode file via Moonraker."""
-        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+        """Start printing a gcode file immediately via G-code and Moonraker API."""
         clean_fn = filename.replace("gcodes/", "").lstrip("/")
-        enc_fn = urllib.parse.quote(clean_fn)
-        body = json.dumps({"filename": clean_fn}).encode("utf-8")
-        url = f"http://{host}/printer/print/start?filename={enc_fn}"
+
+        # 1. Immediate direct Klipper G-code command
+        self.send_gcode(f'SDCARD_PRINT_FILE FILENAME="{clean_fn}"')
+
+        # 2. Moonraker API call in background
+        target_hosts = []
+        if self.active_host:
+            target_hosts.append(self.active_host)
+        for h in self.hosts:
+            if h and h not in target_hosts:
+                target_hosts.append(h)
 
         def _run():
             ok = False
-            try:
-                req = urllib.request.Request(
-                    url,
-                    data=body,
-                    headers={"Content-Type": "application/json", "Accept": "application/json"},
-                    method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=10.0) as resp:
-                    ok = (resp.status == 200)
-            except Exception as e:
-                print(f"[Moonraker] start_print error: {e}")
-                ok = False
+            for target_host in target_hosts:
+                try:
+                    enc_fn = urllib.parse.quote(clean_fn)
+                    body = json.dumps({"filename": clean_fn}).encode("utf-8")
+                    url = f"http://{target_host}/printer/print/start?filename={enc_fn}"
+                    req = urllib.request.Request(
+                        url,
+                        data=body,
+                        headers={"Content-Type": "application/json", "Accept": "application/json"},
+                        method="POST"
+                    )
+                    with urllib.request.urlopen(req, timeout=5.0) as resp:
+                        if resp.status == 200:
+                            ok = True
+                            break
+                except Exception as e:
+                    print(f"[Moonraker] start_print error for {target_host}: {e}")
+
             if on_done:
                 self._dispatch_signal.emit(lambda: on_done(ok))
 
@@ -580,29 +598,33 @@ class MoonrakerClient(QtCore.QObject):
 
         def _run():
             content = ""
-            # Check local file first if on Linux / Pi
-            local_paths = [
-                os.path.expanduser("~/printer_data/config/printer.cfg"),
-                "/home/pi/printer_data/config/printer.cfg",
-            ]
-            for lp in local_paths:
-                if os.path.exists(lp):
-                    try:
-                        with open(lp, "r", encoding="utf-8") as f:
-                            content = f.read()
-                            break
-                    except Exception:
-                        pass
+            # 1. Try Moonraker API first (single source of truth for config files)
+            try:
+                url = f"http://{host}/server/files/config/printer.cfg"
+                req = urllib.request.Request(url, headers={"User-Agent": "KlipperDisplay"})
+                with urllib.request.urlopen(req, timeout=3.0) as resp:
+                    if resp.status == 200:
+                        content = resp.read().decode("utf-8")
+            except Exception:
+                pass
 
+            # 2. Fallback to direct local files
             if not content:
-                try:
-                    url = f"http://{host}/server/files/config/printer.cfg"
-                    req = urllib.request.Request(url, headers={"User-Agent": "KlipperDisplay"})
-                    with urllib.request.urlopen(req, timeout=4.0) as resp:
-                        if resp.status == 200:
-                            content = resp.read().decode("utf-8")
-                except Exception:
-                    pass
+                local_paths = [
+                    self.firmware_info.get("config_file", ""),
+                    os.path.expanduser("~/printer_data/config/printer.cfg"),
+                    "/home/pi/printer_data/config/printer.cfg",
+                    "/root/printer_data/config/printer.cfg",
+                ]
+                for lp in local_paths:
+                    if lp and os.path.exists(lp):
+                        try:
+                            with open(lp, "r", encoding="utf-8") as f:
+                                content = f.read()
+                                if content:
+                                    break
+                        except Exception:
+                            pass
 
             if on_done:
                 self._dispatch_signal.emit(lambda: on_done(content))
@@ -617,11 +639,13 @@ class MoonrakerClient(QtCore.QObject):
             ok = False
             # 1. Direct local file write if on Linux / Pi
             local_paths = [
+                self.firmware_info.get("config_file", ""),
                 os.path.expanduser("~/printer_data/config/printer.cfg"),
                 "/home/pi/printer_data/config/printer.cfg",
+                "/root/printer_data/config/printer.cfg",
             ]
             for lp in local_paths:
-                if os.path.exists(lp):
+                if lp and os.path.exists(lp):
                     try:
                         with open(lp, "w", encoding="utf-8") as f:
                             f.write(content)
@@ -667,7 +691,7 @@ class MoonrakerClient(QtCore.QObject):
         threading.Thread(target=_run, daemon=True).start()
 
     def check_start_gcode_mesh(self, on_done=None):
-        """Check if bed mesh is active/unhashed or hashed out in the start gcode macro."""
+        """Check if bed mesh is active/unhashed or hashed out in printer.cfg start gcode macro."""
         def _on_cfg(content: str):
             if not content:
                 if on_done:
@@ -683,12 +707,14 @@ class MoonrakerClient(QtCore.QObject):
 
             macro_lines = m.group(0).splitlines()
             is_enabled = False
+            pattern = re.compile(r"^\s*(#*)\s*(BED_MESH_(?:PROFILE\s+LOAD|CALIBRATE)[^\r\n]*)", re.IGNORECASE)
             for line in macro_lines:
-                clean = line.strip()
-                if re.search(r"bed_mesh_(?:profile\s+load|calibrate)", clean, re.IGNORECASE):
-                    if not clean.startswith("#"):
+                match = pattern.search(line)
+                if match:
+                    is_hashed = bool(match.group(1))
+                    if not is_hashed:
                         is_enabled = True
-                        break
+                    break
 
             if on_done:
                 on_done(is_enabled, is_configured)
