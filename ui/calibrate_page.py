@@ -52,7 +52,7 @@ CALIBRATION_DETAILS = {
         "id": "load_cell_weight_test",
         "icon": "probe",
         "title": "Load Cell Weight Test",
-        "cmd": "",
+        "cmd": "LOAD_CELL_READ",
         "desc": "Test & read weight attached to probe.",
         "prereqs": "Clean, cold nozzle. Hang test weight or place weight on bed scale.",
         "steps": [
@@ -3175,6 +3175,11 @@ class CalibrateCard(QtWidgets.QFrame):
         self.setObjectName("CalibrateCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+        self.setMinimumWidth(0)
 
         self._layout = QtWidgets.QHBoxLayout(self)
 
@@ -3189,14 +3194,16 @@ class CalibrateCard(QtWidgets.QFrame):
 
         self.title_label = QtWidgets.QLabel(item["title"])
         self.title_label.setObjectName("CalTitle")
+        self.title_label.setMinimumWidth(0)
         mid.addWidget(self.title_label)
 
         self.desc_label = QtWidgets.QLabel(item["desc"])
         self.desc_label.setObjectName("CalDesc")
+        self.desc_label.setMinimumWidth(0)
         mid.addWidget(self.desc_label)
 
         cmd_row = QtWidgets.QHBoxLayout()
-        self.cmd_badge = QtWidgets.QLabel(item["cmd"])
+        self.cmd_badge = QtWidgets.QLabel(item.get("cmd") or "CALIBRATE")
         self.cmd_badge.setObjectName("CalCmdBadge")
         cmd_row.addWidget(self.cmd_badge)
         cmd_row.addStretch(1)
@@ -3223,6 +3230,7 @@ class CalibrateCard(QtWidgets.QFrame):
         self._layout.setSpacing(_s(10, s))
         self.icon_label.setPixmap(icons.pixmap(self.item["icon"], _s(38, s)))
         self.icon_label.setFixedSize(_s(42, s), _s(42, s))
+        self.setFixedHeight(_s(82, s))
 
 
 class CalibratePage(QtWidgets.QWidget):

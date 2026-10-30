@@ -29,6 +29,11 @@ class SettingActionCard(QtWidgets.QFrame):
         self.setObjectName("CalibrateCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+        self.setMinimumWidth(0)
 
         self._layout = QtWidgets.QHBoxLayout(self)
 
@@ -41,20 +46,21 @@ class SettingActionCard(QtWidgets.QFrame):
 
         self.title_label = QtWidgets.QLabel(item["title"])
         self.title_label.setObjectName("CalTitle")
+        self.title_label.setMinimumWidth(0)
         mid.addWidget(self.title_label)
 
         self.desc_label = QtWidgets.QLabel(item["desc"])
         self.desc_label.setObjectName("CalDesc")
+        self.desc_label.setMinimumWidth(0)
         mid.addWidget(self.desc_label)
 
-        cmd_badge_text = item.get("cmd", "")
-        if cmd_badge_text:
-            cmd_row = QtWidgets.QHBoxLayout()
-            self.cmd_badge = QtWidgets.QLabel(cmd_badge_text)
-            self.cmd_badge.setObjectName("CalCmdBadge")
-            cmd_row.addWidget(self.cmd_badge)
-            cmd_row.addStretch(1)
-            mid.addLayout(cmd_row)
+        cmd_badge_text = item.get("cmd") or "CALIBRATE"
+        cmd_row = QtWidgets.QHBoxLayout()
+        self.cmd_badge = QtWidgets.QLabel(cmd_badge_text)
+        self.cmd_badge.setObjectName("CalCmdBadge")
+        cmd_row.addWidget(self.cmd_badge)
+        cmd_row.addStretch(1)
+        mid.addLayout(cmd_row)
 
         self._layout.addLayout(mid, 1)
 
@@ -76,6 +82,7 @@ class SettingActionCard(QtWidgets.QFrame):
         self._layout.setSpacing(_s(10, s))
         self.icon_label.setPixmap(icons.pixmap(self.item["icon"], _s(38, s)))
         self.icon_label.setFixedSize(_s(42, s), _s(42, s))
+        self.setFixedHeight(_s(82, s))
 
 
 class SystemOptionTile(QtWidgets.QFrame):
@@ -88,6 +95,11 @@ class SystemOptionTile(QtWidgets.QFrame):
         self.setObjectName("CalibrateCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+        self.setMinimumWidth(0)
 
         self._layout = QtWidgets.QHBoxLayout(self)
 
@@ -100,10 +112,12 @@ class SystemOptionTile(QtWidgets.QFrame):
 
         self.title_label = QtWidgets.QLabel(title)
         self.title_label.setObjectName("CalTitle")
+        self.title_label.setMinimumWidth(0)
         mid.addWidget(self.title_label)
 
         self.sub_label = QtWidgets.QLabel(subtitle)
         self.sub_label.setObjectName("CalDesc")
+        self.sub_label.setMinimumWidth(0)
         mid.addWidget(self.sub_label)
 
         cmd_row = QtWidgets.QHBoxLayout()
@@ -117,6 +131,7 @@ class SystemOptionTile(QtWidgets.QFrame):
 
         self.arrow = QtWidgets.QLabel("\u203A")
         self.arrow.setObjectName("CalCardArrow")
+        self.arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._layout.addWidget(self.arrow, 0, Qt.AlignmentFlag.AlignVCenter)
 
     def mousePressEvent(self, event):
@@ -132,6 +147,7 @@ class SystemOptionTile(QtWidgets.QFrame):
         self._layout.setSpacing(_s(10, s))
         self.icon_label.setPixmap(icons.pixmap(self.icon_name, _s(38, s)))
         self.icon_label.setFixedSize(_s(42, s), _s(42, s))
+        self.setFixedHeight(_s(82, s))
 
 
 class SettingsInfoView(QtWidgets.QFrame):
@@ -639,11 +655,11 @@ class SettingsPage(QtWidgets.QWidget):
         self.cal_cards = []
         self._rebuild_cal_cards()
 
+        self.grid_cal.setColumnMinimumWidth(0, 1)
+        self.grid_cal.setColumnMinimumWidth(1, 1)
         self.grid_cal.setColumnStretch(0, 1)
         self.grid_cal.setColumnStretch(1, 1)
         self.vbox.addLayout(self.grid_cal)
-
-        self.vbox.addSpacing(8)
 
         # --- Section 2: Diagnostics, Firmware & Host ---
         sec2 = QtWidgets.QLabel("DIAGNOSTICS, FIRMWARE & HOST")
@@ -658,7 +674,7 @@ class SettingsPage(QtWidgets.QWidget):
 
         self.tests_card = SystemOptionTile(
             "endstop", "Printer Tests",
-            "Motor buzz checks, live endstop status & nozzle touch probe.",
+            "Motor buzz, endstops & nozzle touch.",
             "MOTORS \u2022 ENDSTOPS",
             on_click=self._on_printer_tests
         )
@@ -667,7 +683,7 @@ class SettingsPage(QtWidgets.QWidget):
 
         self.fw_info_card = SystemOptionTile(
             "firmware", "Firmware & MCU Info",
-            "Installed Klipper, MCU & Moonraker versions.",
+            "Live Host, MCU & Klipper telemetry.",
             "v0.13.0 Klipper",
             on_click=self._on_firmware_info
         )
@@ -676,13 +692,15 @@ class SettingsPage(QtWidgets.QWidget):
 
         disp_card = SystemOptionTile(
             "sun", "Display & Timeout",
-            "Brightness and screen blanking timer.",
+            "Brightness & screen blanking timer.",
             "100% Brightness",
             on_click=self._on_display_info
         )
         self.grid_sys.addWidget(disp_card, 1, 0)
         self.sys_cards.append(disp_card)
 
+        self.grid_sys.setColumnMinimumWidth(0, 1)
+        self.grid_sys.setColumnMinimumWidth(1, 1)
         self.grid_sys.setColumnStretch(0, 1)
         self.grid_sys.setColumnStretch(1, 1)
         self.vbox.addLayout(self.grid_sys)
@@ -704,7 +722,7 @@ class SettingsPage(QtWidgets.QWidget):
         chip = fw_info.get("mcu_chip", "MCU")
         short_ver = kver.split("-")[0] if "-" in kver else kver
         self.fw_info_card.badge_lbl.setText(f"{short_ver} Klipper")
-        self.fw_info_card.sub_label.setText(f"MCU: {chip} \u2022 {kver[:18]}")
+        self.fw_info_card.sub_label.setText(f"MCU: {chip} \u2022 Live System Loads")
 
     def update_config(self, config: dict, objects: list = None):
         """Update active Klipper config and dynamically rebuild supported setting/calibration cards."""
@@ -817,14 +835,14 @@ class SettingsPage(QtWidgets.QWidget):
     def apply_scale(self, s: float):
         self._scale = s
         m = _s(14, s)
-        self.vbox.setContentsMargins(m, m, m, m)
-        self.vbox.setSpacing(_s(8, s))
+        self.vbox.setContentsMargins(m, _s(8, s), m, _s(8, s))
+        self.vbox.setSpacing(_s(5, s))
         self.grid_cal.setHorizontalSpacing(_s(12, s))
-        self.grid_cal.setVerticalSpacing(_s(10, s))
+        self.grid_cal.setVerticalSpacing(_s(8, s))
         self.grid_sys.setHorizontalSpacing(_s(12, s))
-        self.grid_sys.setVerticalSpacing(_s(10, s))
+        self.grid_sys.setVerticalSpacing(_s(8, s))
         for h in self.headers:
-            h.setStyleSheet(f"font-size: {_s(11, s)}px; font-weight: 800; letter-spacing: 0.8px; color: #94A3B8; margin-top: {_s(6, s)}px; margin-bottom: {_s(2, s)}px;")
+            h.setStyleSheet(f"font-size: {_s(11, s)}px; font-weight: 800; letter-spacing: 0.8px; color: #94A3B8; margin-top: {_s(2, s)}px; margin-bottom: {_s(1, s)}px;")
         for card in self.cal_cards:
             card.apply_scale(s)
         for card in self.sys_cards:

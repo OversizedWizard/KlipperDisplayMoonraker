@@ -25,9 +25,18 @@ class PrinterTestsScreen(QtWidgets.QFrame):
         super().__init__(parent)
         self.scale = scale
         self._busy_poll = False
-        self._tare_timestamp = time.time()
+        self._poll_tick = 0
+        self._tare_timestamp = 0.0
         self._has_load_cell = True
-        self._touch_threshold_g = 25.0  # Sensitive nozzle touch threshold (probing feel)
+        self._touch_threshold_g = 1.5  # Sensitive nozzle touch delta threshold (g)
+        self._baseline_force_g = None
+        self._prev_force_g = None
+        self._last_min_fg = 0.0
+        self._last_max_fg = 0.0
+        self._last_touch_time = 0.0
+        self._last_touch_force_g = 0.0
+        self._last_touch_delta_g = 0.0
+        self._is_z_triggered = False
 
         self.setObjectName("PrinterTestsScreen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -291,12 +300,12 @@ class PrinterTestsScreen(QtWidgets.QFrame):
         bot.addWidget(back_btn)
         root.addLayout(bot)
 
-        # Polling timer for live endstop & load cell nozzle touch status
+        # Polling timer for live endstop & load cell nozzle touch status (5 Hz / 200ms)
         self._poll_timer = QtCore.QTimer(self)
-        self._poll_timer.setInterval(350)
+        self._poll_timer.setInterval(200)
         self._poll_timer.timeout.connect(self._poll_status)
 
-        QtCore.QTimer.singleShot(100, self._init_screen)
+        QtCore.QTimer.singleShot(60, self._init_screen)
 
     def _style_endstop_pill(self, pill: QtWidgets.QLabel, is_closed: bool):
         s = self.scale
@@ -385,27 +394,118 @@ class PrinterTestsScreen(QtWidgets.QFrame):
                 self.motor_btns["stepper_z1"].setEnabled(False)
                 self.motor_btns["stepper_z1"].setText("⇵  Z1 (N/A)")
 
-            # Automatically tare load cell on open so nozzle touch starts from 0.0g
-            if mr.has_load_cell():
-                self._tare_timestamp = time.time()
-                mr.tare_load_cell()
+            if hasattr(mr, "load_cell_updated"):
+                try:
+                    mr.load_cell_updated.connect(self._on_live_force_stream)
+                except Exception:
+                    pass
 
         self._poll_timer.start()
-        self._poll_status()
+        self._poll_status(force_hw=True)
 
-    def _poll_status(self):
-        if self._busy_poll:
+    def _on_live_force_stream(self, fg: float):
+        if not self._has_load_cell:
+            return
+        mn = min(fg, self._last_min_fg) if self._prev_force_g is not None else fg
+        mx = max(fg, self._last_max_fg) if self._prev_force_g is not None else fg
+        self._evaluate_and_render_load_cell(fg, mn, mx, hw_z_closed=False, probe_closed=False)
+
+    def _poll_status(self, force_hw: bool = False):
+        if self._busy_poll and not force_hw:
             return
         mr = self._get_moonraker()
         if not mr:
             return
         self._busy_poll = True
+        self._poll_tick += 1
+        query_hw = bool(force_hw or (self._poll_tick % 5 == 1))
 
         def _on_res(data: dict):
             self._busy_poll = False
             self._update_ui_from_status(data)
 
-        mr.query_diagnostics_status(on_done=_on_res, query_hw_endstops=True)
+        mr.query_diagnostics_status(on_done=_on_res, query_hw_endstops=query_hw)
+
+    def _evaluate_and_render_load_cell(
+        self,
+        fg: float,
+        min_fg: float,
+        max_fg: float,
+        hw_z_closed: bool = False,
+        probe_closed: bool = False,
+    ):
+        z_row = self.endstop_rows.get("stepper_z")
+        if not z_row:
+            return
+
+        now = time.time()
+        since_tare = now - self._tare_timestamp
+        window_spread = abs(max_fg - min_fg) if since_tare > 1.1 else 0.0
+
+        # Initialize resting baseline on first idle sample
+        if self._baseline_force_g is None:
+            if window_spread < 1.2:
+                self._baseline_force_g = fg
+            else:
+                self._baseline_force_g = 0.0
+
+        step_delta = abs(fg - self._prev_force_g) if (self._prev_force_g is not None and since_tare > 0.6) else 0.0
+        self._prev_force_g = fg
+
+        delta_from_baseline = abs(fg - self._baseline_force_g)
+
+        # If completely idle (very low spread, below trigger threshold), slowly track thermal drift
+        if window_spread < 0.7 and step_delta < 0.25 and delta_from_baseline < self._touch_threshold_g and (now - self._last_touch_time) > 2.5:
+            self._baseline_force_g = 0.85 * self._baseline_force_g + 0.15 * fg
+            delta_from_baseline = abs(fg - self._baseline_force_g)
+
+        # Trigger CLOSED whenever weight changes from touch (delta >= 1.5g, spread >= 1.4g, or step >= 1.0g)
+        active_touch = (
+            (delta_from_baseline >= self._touch_threshold_g)
+            or (window_spread >= 1.4)
+            or (step_delta >= 1.0)
+            or probe_closed
+            or hw_z_closed
+        )
+        if since_tare < 0.6 and not hw_z_closed and not probe_closed:
+            # Brief settle right after explicit Tare command
+            active_touch = abs(fg) >= self._touch_threshold_g
+
+        if active_touch:
+            self._last_touch_time = now
+            self._last_touch_force_g = fg
+            self._last_touch_delta_g = max(delta_from_baseline, window_spread, step_delta, abs(fg))
+
+        # Latch CLOSED state for 2.2s after touch so tapping nozzle + clicking Refresh Endstops shows CLOSED
+        is_touched = active_touch or ((now - self._last_touch_time) < 2.2)
+        self._is_z_triggered = is_touched
+
+        z_row["name"].setText("Z Endstop (Load Cell Probe)")
+        self._style_endstop_pill(z_row["pill"], is_closed=is_touched)
+
+        if is_touched:
+            disp_delta = max(delta_from_baseline, window_spread, self._last_touch_delta_g)
+            z_row["sub"].setText(f"TRIGGERED! Force: {fg:+.1f} g (Δ {disp_delta:.1f} g)")
+            z_row["sub"].setStyleSheet(
+                f"color: #F87171; font-size: {_s(10, self.scale)}px; font-weight: 800; border: none; background: transparent;"
+            )
+            self.lc_info_lbl.setText(
+                f"● PROBE CLOSED (TRIGGERED) • Force: {fg:+.1f} g (Δ {disp_delta:.1f} g)"
+            )
+            self.lc_info_lbl.setStyleSheet(
+                f"color: #EF4444; font-size: {_s(10, self.scale)}px; font-weight: 900;"
+            )
+        else:
+            z_row["sub"].setText(f"Force: {fg:+.1f} g (Δ {delta_from_baseline:.1f} g) • Touch nozzle")
+            z_row["sub"].setStyleSheet(
+                f"color: #94A3B8; font-size: {_s(10, self.scale)}px; font-weight: 600; border: none; background: transparent;"
+            )
+            self.lc_info_lbl.setText(
+                f"○ Probe Open • Force: {fg:+.1f} g (Triggers on ≥ {self._touch_threshold_g:.1f} g change)"
+            )
+            self.lc_info_lbl.setStyleSheet(
+                f"color: #38BDF8; font-size: {_s(10, self.scale)}px; font-weight: 700;"
+            )
 
     def _update_ui_from_status(self, data: dict):
         endstops = data.get("endstops", {})
@@ -415,47 +515,33 @@ class PrinterTestsScreen(QtWidgets.QFrame):
         fg = float(data.get("force_g", 0.0))
         min_fg = float(data.get("min_force_g", fg))
         max_fg = float(data.get("max_force_g", fg))
-        trig_f = float(data.get("trigger_force", 60.0))
+        self._last_min_fg = min_fg
+        self._last_max_fg = max_fg
 
-        # Update X and Y endstops
-        for key in ("stepper_x", "stepper_y"):
-            row = self.endstop_rows.get(key)
-            if not row:
-                continue
-            raw_val = str(endstops.get(key, "open")).lower()
-            is_closed = raw_val not in ("open", "0", "false", "")
-            self._style_endstop_pill(row["pill"], is_closed=is_closed)
+        # Update X and Y endstops (only if endstops dict was returned)
+        if endstops:
+            for key in ("stepper_x", "stepper_y"):
+                row = self.endstop_rows.get(key)
+                if not row:
+                    continue
+                raw_val = str(endstops.get(key, "open")).lower()
+                is_closed = raw_val not in ("open", "0", "false", "")
+                self._style_endstop_pill(row["pill"], is_closed=is_closed)
 
         # Update Z Endstop / Load Cell Probe
         z_row = self.endstop_rows.get("stepper_z")
         if z_row:
-            raw_z = str(endstops.get("stepper_z", endstops.get("z", "open"))).lower()
+            raw_z = str(endstops.get("stepper_z", endstops.get("z", "open"))).lower() if endstops else "open"
             hw_z_closed = raw_z not in ("open", "0", "false", "")
 
             if has_lc:
-                z_row["name"].setText("Z Endstop (Load Cell Probe)")
-                # Wait 1.1s after tare so pre-tare min/max window clears
-                since_tare = time.time() - self._tare_timestamp
-                if since_tare > 1.1:
-                    peak_force = max(abs(fg), abs(max_fg), abs(min_fg))
-                else:
-                    peak_force = abs(fg)
-
-                # Trigger CLOSED when nozzle is touched (just like probing)
-                threshold = min(trig_f, self._touch_threshold_g) if trig_f > 0 else self._touch_threshold_g
-                is_touched = (peak_force >= threshold) or bool(data.get("probe_closed", False)) or hw_z_closed
-
-                self._style_endstop_pill(z_row["pill"], is_closed=is_touched)
-                if is_touched:
-                    z_row["sub"].setText(f"NOZZLE TOUCHED! ({peak_force:.1f} g)")
-                    z_row["sub"].setStyleSheet(f"color: #F87171; font-size: {_s(10, self.scale)}px; font-weight: 800; border: none; background: transparent;")
-                    self.lc_info_lbl.setText(f"● PROBE CLOSED • Force: {fg:+.1f} g (Peak: {peak_force:.1f} g)")
-                    self.lc_info_lbl.setStyleSheet(f"color: #EF4444; font-size: {_s(10, self.scale)}px; font-weight: 900;")
-                else:
-                    z_row["sub"].setText(f"Force: {fg:+.1f} g • Touch nozzle")
-                    z_row["sub"].setStyleSheet(f"color: #94A3B8; font-size: {_s(10, self.scale)}px; font-weight: 600; border: none; background: transparent;")
-                    self.lc_info_lbl.setText(f"○ Probe Open • Force: {fg:+.1f} g (Touch ≥ {threshold:.0f} g)")
-                    self.lc_info_lbl.setStyleSheet(f"color: #38BDF8; font-size: {_s(10, self.scale)}px; font-weight: 700;")
+                self._evaluate_and_render_load_cell(
+                    fg=fg,
+                    min_fg=min_fg,
+                    max_fg=max_fg,
+                    hw_z_closed=hw_z_closed,
+                    probe_closed=bool(data.get("probe_closed", False)),
+                )
             else:
                 z_row["name"].setText("Z-Axis Endstop")
                 z_row["sub"].setText("Physical / inductive Z endstop (stepper_z)")
@@ -465,17 +551,36 @@ class PrinterTestsScreen(QtWidgets.QFrame):
     def _manual_refresh_endstops(self):
         self.status_banner.setText("Querying all endstops & load cell probe...")
         self._busy_poll = False
-        self._poll_status()
-        QtCore.QTimer.singleShot(400, lambda: self.status_banner.setText("✓ Endstop states refreshed"))
+        self._poll_status(force_hw=True)
+
+        def _report():
+            if self._has_load_cell and self._is_z_triggered:
+                self.status_banner.setText(
+                    f"● Z Probe TRIGGERED (CLOSED) — Force: {self._last_touch_force_g:+.1f} g (Δ {self._last_touch_delta_g:.1f} g)"
+                )
+            else:
+                self.status_banner.setText("✓ Endstop states refreshed (All OPEN)")
+
+        QtCore.QTimer.singleShot(280, _report)
 
     def _on_tare_nozzle(self):
         mr = self._get_moonraker()
         if not mr:
             return
         self._tare_timestamp = time.time()
+        self._last_touch_time = 0.0
+        self._baseline_force_g = 0.0
+        self._prev_force_g = 0.0
         self.status_banner.setText("⚖️ Taring Load Cell Probe to 0.0 g...")
+
         def _done(ok: bool):
+            self._tare_timestamp = time.time()
+            self._baseline_force_g = 0.0
+            self._prev_force_g = 0.0
+            self._last_touch_time = 0.0
             self.status_banner.setText("✓ Load Cell zeroed (0.0 g) — touch nozzle to test CLOSED state")
+            self._poll_status(force_hw=False)
+
         mr.tare_load_cell(on_done=_done)
 
     def _on_buzz_motor(self, stepper_id: str, label: str):
@@ -513,12 +618,21 @@ class PrinterTestsScreen(QtWidgets.QFrame):
         self.status_banner.setText("🏠 Homing all axes (G28)...")
         mr.home(on_done=lambda ok: self.status_banner.setText("✓ Homing (G28) complete" if ok else "⚠ Homing failed or interrupted"))
 
-    def _on_close(self):
+    def _cleanup_signals(self):
         self._poll_timer.stop()
+        mr = self._get_moonraker()
+        if mr and hasattr(mr, "load_cell_updated"):
+            try:
+                mr.load_cell_updated.disconnect(self._on_live_force_stream)
+            except Exception:
+                pass
+
+    def _on_close(self):
+        self._cleanup_signals()
         self.closed.emit()
 
     def hideEvent(self, event):
-        self._poll_timer.stop()
+        self._cleanup_signals()
         super().hideEvent(event)
 
     def apply_scale(self, s: float):
