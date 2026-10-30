@@ -18,6 +18,7 @@ def parse_args():
     p.add_argument("--hide-cursor", action="store_true", help="hide mouse cursor (touchscreens)")
     p.add_argument("--width", type=int, default=800, help="window width (default 800)")
     p.add_argument("--height", type=int, default=480, help="window height (default 480)")
+    p.add_argument("--host", type=str, default=None, help="Moonraker host:port (default: 127.0.0.1:7125)")
     return p.parse_args()
 
 
@@ -29,7 +30,7 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Klipper 3D Display")
 
-    win = MainWindow()
+    win = MainWindow(host=args.host)
     if args.hide_cursor:
         app.setOverrideCursor(Qt.CursorShape.BlankCursor)
     if args.fullscreen:

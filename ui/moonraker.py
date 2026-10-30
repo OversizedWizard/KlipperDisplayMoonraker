@@ -1,10 +1,11 @@
-"""Non-blocking Moonraker HTTP API client with automatic local/remote failover.
+"""Non-blocking Moonraker HTTP API client for local Klipper instances.
 
-Attempts 127.0.0.1:7125 (on-Pi local) and 192.168.0.99:7125 (Pi 4 over LAN),
+Connects to 127.0.0.1:7125 (local Moonraker instance),
 polling live temperatures and printer connection state on a background thread.
 """
 
 import json
+import os
 import threading
 import urllib.parse
 import urllib.request
@@ -13,8 +14,7 @@ from typing import Optional
 from .qt import QtCore, Signal
 
 DEFAULT_HOSTS = [
-    "127.0.0.1:7125",
-    "192.168.0.99:7125",
+    os.environ.get("MOONRAKER_HOST", "127.0.0.1:7125"),
 ]
 
 

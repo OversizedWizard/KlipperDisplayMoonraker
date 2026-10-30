@@ -1,3 +1,4 @@
+import sys
 """Base screen widgets: left sidebar, top bar, placeholder pages, main window."""
 
 from datetime import datetime
@@ -29,7 +30,7 @@ def _s(v: float, s: float) -> int:
 class Sidebar(QtWidgets.QFrame):
     page_selected = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, host: str = None, parent=None):
         super().__init__(parent)
         self.setObjectName("Sidebar")
 
@@ -212,7 +213,7 @@ class PlaceholderPage(QtWidgets.QWidget):
 
 
 class MainWindow(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, host: str = None):
         super().__init__()
         self.setObjectName("Root")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -265,8 +266,15 @@ class MainWindow(QtWidgets.QWidget):
 
         self.sidebar.page_selected.connect(self.show_page)
 
-        # Live Moonraker client (tries 127.0.0.1:7125 then 192.168.0.99:7125)
-        self.moonraker = MoonrakerClient(parent=self)
+        # Live Moonraker client: on Windows PC, allow LAN printer testing (192.168.0.99);
+        # on Linux/Raspberry Pi (Git release), strictly use local 127.0.0.1:7125.
+        if host:
+            hosts = [host]
+        elif sys.platform.startswith("win"):
+            hosts = ["127.0.0.1:7125", "192.168.0.99:7125"]
+        else:
+            hosts = ["127.0.0.1:7125"]
+        self.moonraker = MoonrakerClient(hosts=hosts, parent=self)
         self.moonraker.connection_changed.connect(self._on_connection_changed)
         self.moonraker.config_loaded.connect(self._on_config_loaded)
         self.moonraker.firmware_info_updated.connect(self.pages["settings"].update_firmware_info)
