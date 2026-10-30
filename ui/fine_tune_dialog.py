@@ -374,3 +374,4 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
     def mousePressEvent(self, event):
         event.accept()
+

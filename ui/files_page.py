@@ -10,7 +10,7 @@ from typing import List, Dict, Optional
 
 from .qt import QtWidgets, QtCore, QtGui, Qt, Signal
 from . import icons
-from .thumbnail_helper import load_thumbnail_async, get_default_thumbnail, extract_embedded_thumbnail_from_file
+from .thumbnail_helper import load_thumbnail_async, get_default_thumbnail
 
 
 def _s(v: float, s: float) -> int:
@@ -40,11 +40,13 @@ class FileDetailsDialog(QtWidgets.QFrame):
     start_print_requested = Signal(str)
     closed = Signal()
 
-    def __init__(self, file_info: dict, host: str, scale: float = 1.0, parent=None):
+    def __init__(self, file_info: dict, moonraker=None, scale: float = 1.0, parent=None):
         super().__init__(parent)
         self.scale = scale
-        self.file_info = file_info
-        self.host = host
+        self.file_info = dict(file_info)
+        self.moonraker = moonraker
+        self.host = (moonraker.active_host or (moonraker.hosts[0] if moonraker.hosts else "127.0.0.1:7125")) if moonraker else "127.0.0.1:7125"
+
         self.setObjectName("FileDetailsOverlay")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet("QFrame#FileDetailsOverlay { background: rgba(5, 10, 20, 0.88); }")
@@ -81,7 +83,7 @@ class FileDetailsDialog(QtWidgets.QFrame):
         self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_lbl.setStyleSheet(f"""
             background: #1E293B;
-            border: 1px solid rgba(0, 229, 255, 0.3);
+            border: 1.5px solid rgba(0, 229, 255, 0.3);
             border-radius: {_s(10, scale)}px;
         """)
         self.thumb_lbl.setPixmap(get_default_thumbnail(_s(110, scale)))
@@ -93,7 +95,7 @@ class FileDetailsDialog(QtWidgets.QFrame):
         right_box = QtWidgets.QVBoxLayout()
         right_box.setSpacing(_s(10, scale))
 
-        filename = file_info.get("filename", "")
+        filename = self.file_info.get("filename", "")
         self.title_lbl = QtWidgets.QLabel(filename)
         self.title_lbl.setWordWrap(True)
         self.title_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(14, scale)}px; font-weight: 800;")
@@ -104,33 +106,33 @@ class FileDetailsDialog(QtWidgets.QFrame):
         meta_grid.setHorizontalSpacing(_s(12, scale))
         meta_grid.setVerticalSpacing(_s(4, scale))
 
-        est_time = format_duration(file_info.get("estimated_time", 0))
+        est_time = format_duration(self.file_info.get("estimated_time", 0))
         meta_grid.addWidget(QtWidgets.QLabel("Est. Time:"), 0, 0)
-        time_val = QtWidgets.QLabel(est_time)
-        time_val.setStyleSheet("color: #00E5FF; font-weight: 800;")
-        meta_grid.addWidget(time_val, 0, 1)
+        self.time_val = QtWidgets.QLabel(est_time)
+        self.time_val.setStyleSheet("color: #00E5FF; font-weight: 800;")
+        meta_grid.addWidget(self.time_val, 0, 1)
 
-        f_weight = file_info.get("filament_weight_total")
-        f_len = file_info.get("filament_total")
+        f_weight = self.file_info.get("filament_weight_total")
+        f_len = self.file_info.get("filament_total")
         f_text = f"{f_weight:.1f} g" if f_weight else (f"{f_len/1000:.1f} m" if f_len else "Unknown")
         meta_grid.addWidget(QtWidgets.QLabel("Filament:"), 1, 0)
-        f_val = QtWidgets.QLabel(f_text)
-        f_val.setStyleSheet("color: #F8FAFC; font-weight: 700;")
-        meta_grid.addWidget(f_val, 1, 1)
+        self.f_val = QtWidgets.QLabel(f_text)
+        self.f_val.setStyleSheet("color: #F8FAFC; font-weight: 700;")
+        meta_grid.addWidget(self.f_val, 1, 1)
 
-        l_count = file_info.get("layer_count")
-        l_height = file_info.get("layer_height")
+        l_count = self.file_info.get("layer_count")
+        l_height = self.file_info.get("layer_height")
         l_text = f"{l_count} layers ({l_height}mm)" if l_count and l_height else (f"{l_height}mm" if l_height else "Standard")
         meta_grid.addWidget(QtWidgets.QLabel("Layers:"), 2, 0)
-        l_val = QtWidgets.QLabel(l_text)
-        l_val.setStyleSheet("color: #F8FAFC; font-weight: 700;")
-        meta_grid.addWidget(l_val, 2, 1)
+        self.l_val = QtWidgets.QLabel(l_text)
+        self.l_val.setStyleSheet("color: #F8FAFC; font-weight: 700;")
+        meta_grid.addWidget(self.l_val, 2, 1)
 
-        slicer = file_info.get("slicer") or "Unknown"
+        slicer = self.file_info.get("slicer") or "Unknown"
         meta_grid.addWidget(QtWidgets.QLabel("Slicer:"), 3, 0)
-        s_val = QtWidgets.QLabel(slicer)
-        s_val.setStyleSheet("color: #94A3B8; font-weight: 600;")
-        meta_grid.addWidget(s_val, 3, 1)
+        self.s_val = QtWidgets.QLabel(slicer)
+        self.s_val.setStyleSheet("color: #94A3B8; font-weight: 600;")
+        meta_grid.addWidget(self.s_val, 3, 1)
 
         for r in range(4):
             lbl = meta_grid.itemAtPosition(r, 0).widget()
@@ -186,23 +188,61 @@ class FileDetailsDialog(QtWidgets.QFrame):
         outer.addWidget(self.card)
         self.card.setFixedSize(_s(540, scale), _s(270, scale))
 
-        # Asynchronously load large thumbnail if available
-        thumbs = file_info.get("thumbnails", [])
+        # Asynchronously load large thumbnail
+        thumbs = self.file_info.get("thumbnails", [])
+        rel_p = thumbs[0].get("relative_path") if thumbs else None
+        dir_p = self.file_info.get("dir_path", "gcodes")
+
+        load_thumbnail_async(
+            host=self.host,
+            dir_path=dir_p,
+            thumb_rel_path=rel_p,
+            filename=filename,
+            target_size=_s(170, scale),
+            on_loaded=self._set_thumb_pixmap
+        )
+
+        # If metadata missing, fetch from Moonraker
+        if not self.file_info.get("estimated_time") and self.moonraker:
+            full_fn = self.file_info.get("full_path") or filename
+            self.moonraker.get_file_metadata(full_fn, on_done=self._on_meta_loaded)
+
+    def _on_meta_loaded(self, meta: dict):
+        if not meta:
+            return
+        self.file_info.update(meta)
+        est = meta.get("estimated_time")
+        if est:
+            self.time_val.setText(format_duration(est))
+        f_weight = meta.get("filament_weight_total")
+        f_len = meta.get("filament_total")
+        if f_weight:
+            self.f_val.setText(f"{f_weight:.1f} g")
+        elif f_len:
+            self.f_val.setText(f"{f_len/1000:.1f} m")
+        l_count = meta.get("layer_count")
+        l_height = meta.get("layer_height")
+        if l_count and l_height:
+            self.l_val.setText(f"{l_count} layers ({l_height}mm)")
+        slicer = meta.get("slicer")
+        if slicer:
+            self.s_val.setText(slicer)
+        thumbs = meta.get("thumbnails", [])
         if thumbs:
-            # Pick largest thumbnail
             best = max(thumbs, key=lambda t: t.get("width", 0) * t.get("height", 0))
             rel_p = best.get("relative_path")
             if rel_p:
                 load_thumbnail_async(
                     host=self.host,
+                    dir_path=self.file_info.get("dir_path", "gcodes"),
                     thumb_rel_path=rel_p,
-                    cache_key=f"lg_{filename}_{rel_p}",
-                    target_size=_s(170, scale),
+                    filename=self.file_info.get("filename", ""),
+                    target_size=_s(170, self.scale),
                     on_loaded=self._set_thumb_pixmap
                 )
 
     def _set_thumb_pixmap(self, pm: QtGui.QPixmap):
-        if not pm.isNull():
+        if pm and not pm.isNull():
             sz = _s(170, self.scale)
             scaled = pm.scaled(sz, sz, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.thumb_lbl.setPixmap(scaled)
@@ -224,12 +264,15 @@ class FileGridCard(QtWidgets.QFrame):
     """Square/vertical card for grid view displaying thumbnail and gcode details."""
     clicked = Signal(dict)
 
-    def __init__(self, item: dict, is_dir: bool, host: str, scale: float = 1.0, parent=None):
+    def __init__(self, item: dict, is_dir: bool, dir_path: str, moonraker=None, scale: float = 1.0, parent=None):
         super().__init__(parent)
-        self.item = item
+        self.item = dict(item)
         self.is_dir = is_dir
-        self.host = host
+        self.dir_path = dir_path
+        self.moonraker = moonraker
         self.scale = scale
+        self.host = (moonraker.active_host or (moonraker.hosts[0] if moonraker.hosts else "127.0.0.1:7125")) if moonraker else "127.0.0.1:7125"
+
         self.setObjectName("FileGridCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -255,9 +298,9 @@ class FileGridCard(QtWidgets.QFrame):
         self.icon_lbl = QtWidgets.QLabel()
         self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_lbl.setFixedSize(_s(110, scale), _s(84, scale))
-        self.icon_lbl.setStyleSheet(f"background: rgba(0, 0, 0, 0.2); border-radius: {_s(6, scale)}px;")
+        self.icon_lbl.setStyleSheet(f"background: rgba(0, 0, 0, 0.25); border-radius: {_s(6, scale)}px;")
 
-        name = item.get("dirname") if is_dir else item.get("filename", "")
+        name = self.item.get("dirname") if is_dir else self.item.get("filename", "")
         if is_dir:
             self.icon_lbl.setPixmap(icons.pixmap("folder", _s(48, scale)))
         else:
@@ -278,8 +321,8 @@ class FileGridCard(QtWidgets.QFrame):
             sub_text = "Folder"
             sub_col = "#FBBF24"
         else:
-            est = item.get("estimated_time")
-            sz = format_size(item.get("size", 0))
+            est = self.item.get("estimated_time")
+            sz = format_size(self.item.get("size", 0))
             sub_text = f"⏱ {format_duration(est)}" if est else sz
             sub_col = "#00E5FF" if est else "#94A3B8"
 
@@ -290,23 +333,49 @@ class FileGridCard(QtWidgets.QFrame):
 
         self.setFixedSize(_s(132, scale), _s(142, scale))
 
-        # Asynchronously load thumbnail for file if provided
         if not is_dir:
-            thumbs = item.get("thumbnails", [])
-            if thumbs:
-                best = max(thumbs, key=lambda t: t.get("width", 0) * t.get("height", 0))
-                rel_p = best.get("relative_path")
-                if rel_p:
-                    load_thumbnail_async(
-                        host=self.host,
-                        thumb_rel_path=rel_p,
-                        cache_key=f"sm_{name}_{rel_p}",
-                        target_size=_s(80, scale),
-                        on_loaded=self._set_thumb
-                    )
+            # 1. Immediately request thumbnail (checks Moonraker, local file, or embedded slicer base64)
+            thumbs = self.item.get("thumbnails", [])
+            rel_p = thumbs[0].get("relative_path") if thumbs else None
+            load_thumbnail_async(
+                host=self.host,
+                dir_path=self.dir_path,
+                thumb_rel_path=rel_p,
+                filename=name,
+                target_size=_s(110, scale),
+                on_loaded=self._set_thumb
+            )
+
+            # 2. If metadata not yet populated, fetch it asynchronously from Moonraker
+            if self.moonraker and not self.item.get("estimated_time"):
+                full_fn = f"{self.dir_path}/{name}" if self.dir_path != "gcodes" else name
+                clean_fn = full_fn.replace("gcodes/", "")
+                self.moonraker.get_file_metadata(clean_fn, on_done=self._on_metadata_loaded)
+
+    def _on_metadata_loaded(self, meta: dict):
+        if not meta:
+            return
+        self.item.update(meta)
+        est = meta.get("estimated_time")
+        if est:
+            self.sub_lbl.setText(f"⏱ {format_duration(est)}")
+            self.sub_lbl.setStyleSheet("color: #00E5FF; font-weight: 700;")
+        thumbs = meta.get("thumbnails", [])
+        if thumbs:
+            best = max(thumbs, key=lambda t: t.get("width", 0) * t.get("height", 0))
+            rel_p = best.get("relative_path")
+            if rel_p:
+                load_thumbnail_async(
+                    host=self.host,
+                    dir_path=self.dir_path,
+                    thumb_rel_path=rel_p,
+                    filename=self.item.get("filename", ""),
+                    target_size=_s(110, self.scale),
+                    on_loaded=self._set_thumb
+                )
 
     def _set_thumb(self, pm: QtGui.QPixmap):
-        if not pm.isNull():
+        if pm and not pm.isNull():
             sz_w = _s(106, self.scale)
             sz_h = _s(80, self.scale)
             scaled = pm.scaled(sz_w, sz_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -324,12 +393,15 @@ class FileListRow(QtWidgets.QFrame):
     """Horizontal row for list view displaying icon/thumbnail, file info, and action."""
     clicked = Signal(dict)
 
-    def __init__(self, item: dict, is_dir: bool, host: str, scale: float = 1.0, parent=None):
+    def __init__(self, item: dict, is_dir: bool, dir_path: str, moonraker=None, scale: float = 1.0, parent=None):
         super().__init__(parent)
-        self.item = item
+        self.item = dict(item)
         self.is_dir = is_dir
-        self.host = host
+        self.dir_path = dir_path
+        self.moonraker = moonraker
         self.scale = scale
+        self.host = (moonraker.active_host or (moonraker.hosts[0] if moonraker.hosts else "127.0.0.1:7125")) if moonraker else "127.0.0.1:7125"
+
         self.setObjectName("FileListRow")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -356,7 +428,7 @@ class FileListRow(QtWidgets.QFrame):
         self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_lbl.setStyleSheet(f"background: rgba(0, 0, 0, 0.25); border-radius: {_s(6, scale)}px;")
 
-        name = item.get("dirname") if is_dir else item.get("filename", "")
+        name = self.item.get("dirname") if is_dir else self.item.get("filename", "")
         if is_dir:
             self.icon_lbl.setPixmap(icons.pixmap("folder", _s(28, scale)))
         else:
@@ -374,14 +446,14 @@ class FileListRow(QtWidgets.QFrame):
             sub = "Directory"
             sub_col = "#FBBF24"
         else:
-            est = item.get("estimated_time")
-            sz = format_size(item.get("size", 0))
+            est = self.item.get("estimated_time")
+            sz = format_size(self.item.get("size", 0))
             sub = f"Estimated: {format_duration(est)}  •  {sz}" if est else f"Size: {sz}"
             sub_col = "#94A3B8"
 
-        sub_lbl = QtWidgets.QLabel(sub)
-        sub_lbl.setStyleSheet(f"color: {sub_col}; font-size: {_s(10, scale)}px; font-weight: 600;")
-        info_box.addWidget(sub_lbl)
+        self.sub_lbl = QtWidgets.QLabel(sub)
+        self.sub_lbl.setStyleSheet(f"color: {sub_col}; font-size: {_s(10, scale)}px; font-weight: 600;")
+        info_box.addWidget(self.sub_lbl)
         layout.addLayout(info_box, 1)
 
         # Right arrow or folder badge
@@ -392,21 +464,46 @@ class FileListRow(QtWidgets.QFrame):
         self.setFixedHeight(_s(54, scale))
 
         if not is_dir:
-            thumbs = item.get("thumbnails", [])
-            if thumbs:
-                best = max(thumbs, key=lambda t: t.get("width", 0) * t.get("height", 0))
-                rel_p = best.get("relative_path")
-                if rel_p:
-                    load_thumbnail_async(
-                        host=self.host,
-                        thumb_rel_path=rel_p,
-                        cache_key=f"row_{name}_{rel_p}",
-                        target_size=_s(40, scale),
-                        on_loaded=self._set_thumb
-                    )
+            thumbs = self.item.get("thumbnails", [])
+            rel_p = thumbs[0].get("relative_path") if thumbs else None
+            load_thumbnail_async(
+                host=self.host,
+                dir_path=self.dir_path,
+                thumb_rel_path=rel_p,
+                filename=name,
+                target_size=_s(42, scale),
+                on_loaded=self._set_thumb
+            )
+
+            if self.moonraker and not self.item.get("estimated_time"):
+                full_fn = f"{self.dir_path}/{name}" if self.dir_path != "gcodes" else name
+                clean_fn = full_fn.replace("gcodes/", "")
+                self.moonraker.get_file_metadata(clean_fn, on_done=self._on_metadata_loaded)
+
+    def _on_metadata_loaded(self, meta: dict):
+        if not meta:
+            return
+        self.item.update(meta)
+        est = meta.get("estimated_time")
+        sz = format_size(self.item.get("size", 0))
+        if est:
+            self.sub_lbl.setText(f"Estimated: {format_duration(est)}  •  {sz}")
+        thumbs = meta.get("thumbnails", [])
+        if thumbs:
+            best = max(thumbs, key=lambda t: t.get("width", 0) * t.get("height", 0))
+            rel_p = best.get("relative_path")
+            if rel_p:
+                load_thumbnail_async(
+                    host=self.host,
+                    dir_path=self.dir_path,
+                    thumb_rel_path=rel_p,
+                    filename=self.item.get("filename", ""),
+                    target_size=_s(42, self.scale),
+                    on_loaded=self._set_thumb
+                )
 
     def _set_thumb(self, pm: QtGui.QPixmap):
-        if not pm.isNull():
+        if pm and not pm.isNull():
             sz = _s(38, self.scale)
             scaled = pm.scaled(sz, sz, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.icon_lbl.setPixmap(scaled)
@@ -426,6 +523,7 @@ class FilesPage(QtWidgets.QWidget):
         super().__init__(parent)
         self.setObjectName("FilesPage")
         self._scale = 1.0
+        self.moonraker = None
 
         self.current_dir = "gcodes"
         self.dir_history: List[str] = []
@@ -433,7 +531,6 @@ class FilesPage(QtWidgets.QWidget):
 
         self.dirs_data: List[dict] = []
         self.files_data: List[dict] = []
-        self.active_host = "127.0.0.1:7125"
 
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(14, 10, 14, 12)
@@ -525,34 +622,19 @@ class FilesPage(QtWidgets.QWidget):
 
     def refresh(self):
         """Query Moonraker for current folder contents."""
-        mr = getattr(self.window(), "moonraker", None)
+        mr = getattr(self, "moonraker", None) or getattr(self.window(), "moonraker", None)
         if mr:
-            self.active_host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
+            self.moonraker = mr
             mr.list_files(self.current_dir, on_done=self._on_files_loaded)
         else:
-            self._render_empty("Moonraker client not initialized.")
+            self._render_empty("Connecting to Moonraker...")
 
     def _on_files_loaded(self, res: dict):
         self.dirs_data = [d for d in res.get("dirs", []) if not d.get("dirname", "").startswith(".")]
         self.files_data = [f for f in res.get("files", []) if not f.get("filename", "").startswith(".")]
-
-        # Also fetch metadata for files that don't have estimated_time yet
-        mr = getattr(self.window(), "moonraker", None)
-        if mr:
-            for f in self.files_data:
-                fn = f.get("filename")
-                if fn and not f.get("estimated_time"):
-                    def _store_meta(m, target_fn=fn):
-                        for item in self.files_data:
-                            if item.get("filename") == target_fn:
-                                item.update(m)
-                                break
-                    mr.get_file_metadata(f"{self.current_dir}/{fn}" if self.current_dir != "gcodes" else fn, on_done=_store_meta)
-
         self._render_view()
 
     def _render_view(self):
-        # Create fresh content widget to cleanly avoid any widget recycling ghosting
         old_w = self.scroll.takeWidget()
         if old_w:
             old_w.deleteLater()
@@ -563,7 +645,6 @@ class FilesPage(QtWidgets.QWidget):
         self.content_layout.setSpacing(10)
         self.scroll.setWidget(self.content_widget)
 
-        # Update Back button visibility and breadcrumb
         is_sub = (self.current_dir != "gcodes")
         self.btn_back.setVisible(is_sub)
         self.path_lbl.setText(f"📁  {self.current_dir}")
@@ -585,14 +666,13 @@ class FilesPage(QtWidgets.QWidget):
         grid.setVerticalSpacing(_s(10, self._scale))
         grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
-        # 4 columns on 800px display
         cols = 4
         col_idx = 0
         row_idx = 0
 
         # Directories first
         for d in self.dirs_data:
-            card = FileGridCard(d, is_dir=True, host=self.active_host, scale=self._scale)
+            card = FileGridCard(d, is_dir=True, dir_path=self.current_dir, moonraker=self.moonraker, scale=self._scale)
             card.clicked.connect(self._on_dir_clicked)
             grid.addWidget(card, row_idx, col_idx)
             col_idx += 1
@@ -602,7 +682,7 @@ class FilesPage(QtWidgets.QWidget):
 
         # Then files
         for f in self.files_data:
-            card = FileGridCard(f, is_dir=False, host=self.active_host, scale=self._scale)
+            card = FileGridCard(f, is_dir=False, dir_path=self.current_dir, moonraker=self.moonraker, scale=self._scale)
             card.clicked.connect(self._on_file_clicked)
             grid.addWidget(card, row_idx, col_idx)
             col_idx += 1
@@ -616,13 +696,13 @@ class FilesPage(QtWidgets.QWidget):
     def _render_list(self):
         # Directories first
         for d in self.dirs_data:
-            row = FileListRow(d, is_dir=True, host=self.active_host, scale=self._scale)
+            row = FileListRow(d, is_dir=True, dir_path=self.current_dir, moonraker=self.moonraker, scale=self._scale)
             row.clicked.connect(self._on_dir_clicked)
             self.content_layout.addWidget(row)
 
         # Then files
         for f in self.files_data:
-            row = FileListRow(f, is_dir=False, host=self.active_host, scale=self._scale)
+            row = FileListRow(f, is_dir=False, dir_path=self.current_dir, moonraker=self.moonraker, scale=self._scale)
             row.clicked.connect(self._on_file_clicked)
             self.content_layout.addWidget(row)
 
@@ -658,24 +738,23 @@ class FilesPage(QtWidgets.QWidget):
         self.refresh()
 
     def _on_file_clicked(self, item: dict):
-        # Open file details modal
         main_win = self.window()
-        full_path = f"{self.current_dir.replace('gcodes/', '')}/{item.get('filename')}" if self.current_dir != "gcodes" else item.get("filename")
+        full_path = f"{self.current_dir.replace('gcodes/', '')}/{item.get('filename')}" if self.current_dir != "gcodes" else item.get('filename')
         dlg_info = dict(item)
         dlg_info["full_path"] = full_path
+        dlg_info["dir_path"] = self.current_dir
 
-        dlg = FileDetailsDialog(dlg_info, host=self.active_host, scale=self._scale, parent=main_win)
+        dlg = FileDetailsDialog(dlg_info, moonraker=self.moonraker, scale=self._scale, parent=main_win)
         dlg.start_print_requested.connect(self._start_print)
         dlg.show()
         dlg.raise_()
 
     def _start_print(self, filename: str):
-        mr = getattr(self.window(), "moonraker", None)
+        mr = self.moonraker or getattr(self.window(), "moonraker", None)
         if mr:
             full_fn = f"{self.current_dir.replace('gcodes/', '')}/{filename}" if self.current_dir != "gcodes" else filename
             mr.start_print(full_fn)
 
-        # Transition directly to printing screen
         main_win = self.window()
         if hasattr(main_win, "show_page"):
             main_win.show_page("printing")

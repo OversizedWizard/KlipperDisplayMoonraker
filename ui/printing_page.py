@@ -499,6 +499,16 @@ class PrintingPage(QtWidgets.QWidget):
             return
         host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
 
+        # Immediately kick off async thumbnail load
+        load_thumbnail_async(
+            host=host,
+            dir_path="gcodes",
+            thumb_rel_path=None,
+            filename=filename,
+            target_size=_s(190, self._scale),
+            on_loaded=self._set_thumb
+        )
+
         def _on_meta(m: dict):
             est = m.get("estimated_time")
             if est:
@@ -510,8 +520,9 @@ class PrintingPage(QtWidgets.QWidget):
                 if rel_p:
                     load_thumbnail_async(
                         host=host,
+                        dir_path="gcodes",
                         thumb_rel_path=rel_p,
-                        cache_key=f"prn_{filename}_{rel_p}",
+                        filename=filename,
                         target_size=_s(190, self._scale),
                         on_loaded=self._set_thumb
                     )
@@ -570,3 +581,4 @@ class PrintingPage(QtWidgets.QWidget):
         self.left_card.setFixedWidth(_s(240, s))
         sz = _s(190, s)
         self.thumb_lbl.setFixedSize(sz, sz)
+
