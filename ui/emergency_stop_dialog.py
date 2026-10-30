@@ -76,7 +76,7 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
         self.msg_lbl.setStyleSheet(f"color: #E2E8F0; font-size: {_s(12, scale)}px; line-height: 1.45;")
         card_layout.addWidget(self.msg_lbl)
 
-        # Buttons
+        # Buttons Row
         self.btn_layout = QtWidgets.QHBoxLayout()
         self.btn_layout.setSpacing(_s(12, scale))
 
@@ -136,7 +136,7 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
         self.card.setFixedWidth(_s(460, scale))
 
     def _on_halt_clicked(self):
-        """Execute emergency stop immediately, then present green Restart Firmware button."""
+        """Execute emergency stop immediately, then center green Restart Firmware button."""
         win = self.window()
         mr = getattr(win, "moonraker", None)
         if mr:
@@ -155,25 +155,31 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
         self.sub_title.setText("All Heaters & Stepper Motors Cut Off")
 
         self.msg_lbl.setText(
-            "Emergency stop executed successfully.\n\n"
-            "Inspect your printer, then tap the green button below to restart Klipper firmware."
+            "Emergency stop executed successfully.\n"
+            "All heaters and stepper motors have been cut off.\n\n"
+            "Tap the button below to restart Klipper firmware."
         )
-        self.msg_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(12, self.scale)}px; font-weight: 600; line-height: 1.5;")
+        self.msg_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.msg_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(13, self.scale)}px; font-weight: 600; line-height: 1.5;")
 
-        # Update cancel button to Close
-        self.btn_cancel.setText("Dismiss / Close")
+        # Remove the Cancel / Dismiss button
+        self.btn_cancel.setVisible(False)
+        self.btn_cancel.deleteLater()
 
-        # Transform action button into bright GREEN Restart Firmware button
+        # Center the green Restart Firmware button at the bottom
+        self.btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.btn_action.setText("⟳  RESTART FIRMWARE")
+        self.btn_action.setFixedHeight(_s(46, self.scale))
+        self.btn_action.setFixedWidth(_s(300, self.scale))
         self.btn_action.setStyleSheet(f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669);
                 color: #FFFFFF;
                 border: 1.5px solid #34D399;
                 border-radius: {_s(8, self.scale)}px;
-                font-size: {_s(13, self.scale)}px;
+                font-size: {_s(14, self.scale)}px;
                 font-weight: 900;
-                letter-spacing: 0.5px;
+                letter-spacing: 0.6px;
                 padding: 0 {_s(20, self.scale)}px;
             }}
             QPushButton:hover {{
@@ -190,9 +196,8 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
 
     def _on_restart_clicked(self):
         """Trigger firmware restart when user taps the green button."""
-        self.btn_action.setText("RESTARTING...")
+        self.btn_action.setText("RESTARTING FIRMWARE...")
         self.btn_action.setEnabled(False)
-        self.btn_cancel.setEnabled(False)
 
         win = self.window()
         mr = getattr(win, "moonraker", None)
