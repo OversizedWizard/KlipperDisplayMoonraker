@@ -379,7 +379,7 @@ class HomePage(QtWidgets.QWidget):
         self.btn_home_all.clicked.connect(self._on_home_all)
         self.bottom_bar.addWidget(self.btn_home_all, 1)
 
-        self.btn_bed_mesh = QtWidgets.QPushButton("⊞  Mesh Level: OFF")
+        self.btn_bed_mesh = QtWidgets.QPushButton("⊞  Bed Levelling")
         self.btn_bed_mesh.setObjectName("BedMeshBtn")
         self.btn_bed_mesh.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_bed_mesh.clicked.connect(self._on_toggle_bed_mesh)
@@ -536,7 +536,7 @@ class HomePage(QtWidgets.QWidget):
     def _update_mesh_button_ui(self):
         s = getattr(self, "_scale", 1.0)
         if not self._mesh_configured:
-            self.btn_bed_mesh.setText("⊞  Mesh: Disabled (cfg)")
+            self.btn_bed_mesh.setText("⊞  Bed Levelling (N/A)")
             self.btn_bed_mesh.setStyleSheet(f"""
                 QPushButton#BedMeshBtn {{
                     background: rgba(239, 68, 68, 0.10);
@@ -549,7 +549,7 @@ class HomePage(QtWidgets.QWidget):
                 }}
             """)
         elif self._mesh_active:
-            self.btn_bed_mesh.setText("⊞  Bed Mesh: ON")
+            self.btn_bed_mesh.setText("⊞  Bed Levelling")
             self.btn_bed_mesh.setStyleSheet(f"""
                 QPushButton#BedMeshBtn {{
                     background: rgba(16, 185, 129, 0.20);
@@ -567,7 +567,7 @@ class HomePage(QtWidgets.QWidget):
                 }}
             """)
         else:
-            self.btn_bed_mesh.setText("⊞  Bed Mesh: OFF")
+            self.btn_bed_mesh.setText("⊞  Bed Levelling")
             self.btn_bed_mesh.setStyleSheet(f"""
                 QPushButton#BedMeshBtn {{
                     background: rgba(239, 68, 68, 0.16);
