@@ -391,6 +391,33 @@ class MoonrakerClient(QtCore.QObject):
 
         threading.Thread(target=_run, daemon=True).start()
 
+    def firmware_restart(self, on_done=None):
+        """Restart Klipper firmware via /printer/firmware_restart with FIRMWARE_RESTART fallback."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _run():
+            ok = False
+            try:
+                url = f"http://{host}/printer/firmware_restart"
+                req = urllib.request.Request(
+                    url,
+                    data=b"{}",
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=10.0) as resp:
+                    ok = (resp.status == 200)
+            except Exception:
+                try:
+                    self.send_gcode("FIRMWARE_RESTART")
+                    ok = True
+                except Exception:
+                    ok = False
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(ok))
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def jog(self, axis: str, distance: float, on_done=None):
         """Relative jog for X, Y, or Z."""
         speed = 600 if axis.upper() == "Z" else 3000

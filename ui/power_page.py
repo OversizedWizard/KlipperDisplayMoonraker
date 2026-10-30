@@ -242,14 +242,24 @@ class PowerPage(QtWidgets.QWidget):
         mr = getattr(self.window(), "moonraker", None)
         if mr and mr.connected:
             def on_done(ok):
-                tile.sub_label.setText("EMERGENCY STOP executed. Heaters off.")
+                tile.sub_label.setText("Halted. Restarting firmware in 2 seconds...")
                 tile.badge_lbl.setText("HALTED")
-                QtCore.QTimer.singleShot(3500, lambda: self._reset_card(tile))
+                QtCore.QTimer.singleShot(2000, lambda: [
+                    mr.firmware_restart(),
+                    tile.sub_label.setText("FIRMWARE_RESTART triggered."),
+                    tile.badge_lbl.setText("RESTARTED"),
+                    QtCore.QTimer.singleShot(3000, lambda: self._reset_card(tile))
+                ])
             mr.emergency_stop(on_done=on_done)
         else:
             QtCore.QTimer.singleShot(800, lambda: [
-                tile.sub_label.setText("Emergency stop triggered (offline mode)."),
-                QtCore.QTimer.singleShot(2500, lambda: self._reset_card(tile))
+                tile.sub_label.setText("Emergency stop triggered (offline mode). Restarting in 2s..."),
+                tile.badge_lbl.setText("HALTED"),
+                QtCore.QTimer.singleShot(2000, lambda: [
+                    tile.sub_label.setText("Firmware restarted."),
+                    tile.badge_lbl.setText("RESTARTED"),
+                    QtCore.QTimer.singleShot(2500, lambda: self._reset_card(tile))
+                ])
             ])
 
     def _on_host_reboot(self, tile: PowerActionCard):

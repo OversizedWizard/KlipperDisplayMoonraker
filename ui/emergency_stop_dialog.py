@@ -1,10 +1,9 @@
-"""Touch-friendly in-window overlay for Emergency Stop (M112) confirmation.
+"""Touch-friendly modal overlay for immediate emergency stop (M112) with green Firmware Restart action.
 
-Designed for embedded touchscreens and kiosk mode (framebuffer, X11, Wayland).
 Renders directly within the MainWindow as a dimmed modal overlay with zero window-manager dependencies.
 """
 
-from .qt import QtWidgets, QtCore, Qt
+from .qt import QtWidgets, QtCore, Qt, Signal
 from . import icons
 
 
@@ -13,14 +12,15 @@ def _s(v: float, s: float) -> int:
 
 
 class EmergencyStopOverlay(QtWidgets.QFrame):
-    """Full-screen darkened modal overlay with touch-friendly Emergency Stop confirmation."""
+    """Modal confirmation overlay for triggering immediate emergency stop (M112) and firmware restart."""
+    closed = Signal()
 
     def __init__(self, parent=None, scale: float = 1.0):
         super().__init__(parent)
         self.scale = scale
-        self.setObjectName("EstopOverlay")
+        self.setObjectName("EmergencyStopOverlay")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet("QFrame#EstopOverlay { background: rgba(5, 10, 20, 0.82); }")
+        self.setStyleSheet("QFrame#EmergencyStopOverlay { background: rgba(5, 10, 20, 0.88); }")
 
         if parent:
             self.setGeometry(parent.rect())
@@ -29,7 +29,7 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Main alert card
+        # Dialog Card Container
         self.card = QtWidgets.QFrame(self)
         self.card.setObjectName("EmergencyStopCard")
         self.card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -55,30 +55,30 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
 
         title_box = QtWidgets.QVBoxLayout()
         title_box.setSpacing(2)
-        title_lbl = QtWidgets.QLabel("EMERGENCY STOP")
-        title_lbl.setStyleSheet(f"color: #EF4444; font-size: {_s(17, scale)}px; font-weight: 900; letter-spacing: 0.8px;")
-        sub_title = QtWidgets.QLabel("Klipper Firmware Halt (M112)")
-        sub_title.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 700;")
-        title_box.addWidget(title_lbl)
-        title_box.addWidget(sub_title)
+        self.title_lbl = QtWidgets.QLabel("EMERGENCY STOP")
+        self.title_lbl.setStyleSheet(f"color: #EF4444; font-size: {_s(17, scale)}px; font-weight: 900; letter-spacing: 0.8px;")
+        self.sub_title = QtWidgets.QLabel("Klipper Firmware Halt (M112)")
+        self.sub_title.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 700;")
+        title_box.addWidget(self.title_lbl)
+        title_box.addWidget(self.sub_title)
         header_layout.addLayout(title_box)
         header_layout.addStretch(1)
 
         card_layout.addLayout(header_layout)
 
         # Message
-        msg_lbl = QtWidgets.QLabel(
+        self.msg_lbl = QtWidgets.QLabel(
             "Are you sure you want to trigger an immediate emergency stop?\n\n"
             "This will instantly cut off all heaters, halt all stepper motors, "
             "and terminate the current print job."
         )
-        msg_lbl.setWordWrap(True)
-        msg_lbl.setStyleSheet(f"color: #E2E8F0; font-size: {_s(12, scale)}px; line-height: 1.45;")
-        card_layout.addWidget(msg_lbl)
+        self.msg_lbl.setWordWrap(True)
+        self.msg_lbl.setStyleSheet(f"color: #E2E8F0; font-size: {_s(12, scale)}px; line-height: 1.45;")
+        card_layout.addWidget(self.msg_lbl)
 
         # Buttons
-        btn_layout = QtWidgets.QHBoxLayout()
-        btn_layout.setSpacing(_s(12, scale))
+        self.btn_layout = QtWidgets.QHBoxLayout()
+        self.btn_layout.setSpacing(_s(12, scale))
 
         self.btn_cancel = QtWidgets.QPushButton("Cancel")
         self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -103,10 +103,10 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
         """)
         self.btn_cancel.clicked.connect(self.close)
 
-        self.btn_halt = QtWidgets.QPushButton("HALT PRINTER NOW")
-        self.btn_halt.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_halt.setFixedHeight(_s(44, scale))
-        self.btn_halt.setStyleSheet(f"""
+        self.btn_action = QtWidgets.QPushButton("HALT PRINTER NOW")
+        self.btn_action.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_action.setFixedHeight(_s(44, scale))
+        self.btn_action.setStyleSheet(f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #EF4444, stop:1 #B91C1C);
                 color: #FFFFFF;
@@ -126,21 +126,80 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
                 border: 1px solid #DC2626;
             }}
         """)
-        self.btn_halt.clicked.connect(self._on_halt_clicked)
+        self.btn_action.clicked.connect(self._on_halt_clicked)
 
-        btn_layout.addWidget(self.btn_cancel, 1)
-        btn_layout.addWidget(self.btn_halt, 2)
-        card_layout.addLayout(btn_layout)
+        self.btn_layout.addWidget(self.btn_cancel, 1)
+        self.btn_layout.addWidget(self.btn_action, 2)
+        card_layout.addLayout(self.btn_layout)
 
         outer.addWidget(self.card)
-        self.card.setFixedWidth(_s(450, scale))
+        self.card.setFixedWidth(_s(460, scale))
 
     def _on_halt_clicked(self):
+        """Execute emergency stop immediately, then present green Restart Firmware button."""
         win = self.window()
         mr = getattr(win, "moonraker", None)
         if mr:
             mr.emergency_stop()
-        self.close()
+
+        # Update card to halted state with green restart button
+        self.card.setStyleSheet(f"""
+            QFrame#EmergencyStopCard {{
+                background: #0F172A;
+                border: 2px solid #10B981;
+                border-radius: {_s(14, self.scale)}px;
+            }}
+        """)
+        self.title_lbl.setText("PRINTER HALTED (M112)")
+        self.title_lbl.setStyleSheet(f"color: #EF4444; font-size: {_s(17, self.scale)}px; font-weight: 900; letter-spacing: 0.8px;")
+        self.sub_title.setText("All Heaters & Stepper Motors Cut Off")
+
+        self.msg_lbl.setText(
+            "Emergency stop executed successfully.\n\n"
+            "Inspect your printer, then tap the green button below to restart Klipper firmware."
+        )
+        self.msg_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(12, self.scale)}px; font-weight: 600; line-height: 1.5;")
+
+        # Update cancel button to Close
+        self.btn_cancel.setText("Dismiss / Close")
+
+        # Transform action button into bright GREEN Restart Firmware button
+        self.btn_action.setText("⟳  RESTART FIRMWARE")
+        self.btn_action.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669);
+                color: #FFFFFF;
+                border: 1.5px solid #34D399;
+                border-radius: {_s(8, self.scale)}px;
+                font-size: {_s(13, self.scale)}px;
+                font-weight: 900;
+                letter-spacing: 0.5px;
+                padding: 0 {_s(20, self.scale)}px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #34D399, stop:1 #10B981);
+                border-color: #6EE7B7;
+            }}
+            QPushButton:pressed {{
+                background: #047857;
+            }}
+        """)
+        # Disconnect old halt handler and connect restart handler
+        self.btn_action.clicked.disconnect()
+        self.btn_action.clicked.connect(self._on_restart_clicked)
+
+    def _on_restart_clicked(self):
+        """Trigger firmware restart when user taps the green button."""
+        self.btn_action.setText("RESTARTING...")
+        self.btn_action.setEnabled(False)
+        self.btn_cancel.setEnabled(False)
+
+        win = self.window()
+        mr = getattr(win, "moonraker", None)
+        if mr:
+            mr.firmware_restart()
+
+        QtCore.QTimer.singleShot(1200, self.close)
 
     def mousePressEvent(self, event):
         # Prevent click-through to widgets underneath
