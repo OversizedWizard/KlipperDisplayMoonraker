@@ -61,6 +61,26 @@ chmod +x install.sh
 
 ---
 
+## 🔄 Updating
+
+To pull the latest updates on your Raspberry Pi (automatically resolving any local file-permission conflicts on `install.sh` / `launch.sh`) and restart the display service:
+
+```bash
+cd ~/KlipperDisplayMoonraker
+git fetch origin
+git reset --hard origin/main
+chmod +x install.sh launch.sh uninstall.sh
+sudo systemctl restart klipper-display 2>/dev/null || sudo systemctl restart klipperscreen
+```
+
+Or as a single one-line command:
+
+```bash
+cd ~/KlipperDisplayMoonraker && git fetch origin && git reset --hard origin/main && chmod +x install.sh launch.sh uninstall.sh && (sudo systemctl restart klipper-display 2>/dev/null || sudo systemctl restart klipperscreen)
+```
+
+---
+
 ## 🛠️ Installer Options
 
 The installer is completely interactive and handles system dependencies, Python virtual environment, and startup configuration:
