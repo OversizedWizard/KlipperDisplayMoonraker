@@ -433,18 +433,12 @@ class PrintingPage(QtWidgets.QWidget):
         main_layout.addWidget(self.right_card, 1)
 
     def prepare_print(self, file_info: dict):
-        """Immediately preview the selected gcode file and show starting state."""
+        """Immediately preview the selected gcode file and show starting / heating state."""
         fn = file_info.get("filename") or file_info.get("full_path") or ""
         self._current_filename = fn
         self.filename_lbl.setText(fn)
 
         self._print_state = "starting"
-        self.status_pill.setText("● STARTING")
-        self.status_pill.setStyleSheet("""
-            color: #F59E0B; background: rgba(245, 158, 11, 0.2);
-            border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
-        """)
-
         self.progress_bar.setValue(0)
         self.pct_lbl.setText("0%")
         self.el_val.setText("00:00:00")
@@ -453,15 +447,32 @@ class PrintingPage(QtWidgets.QWidget):
         self._estimated_total = float(est)
         self.rem_val.setText(format_hms(est))
         self.eta_val.setText("--:--")
-        self.layer_lbl.setText("Starting print...")
+
+        mr = getattr(self, "moonraker", None) or getattr(self.window(), "moonraker", None)
+        if mr and hasattr(mr, "last_print_stats") and mr.last_print_stats:
+            st = mr.last_print_stats
+            b_cur = float(st.get("bed_cur", 0.0))
+            b_tgt = float(st.get("bed_tgt", 0.0))
+            n_cur = float(st.get("nozzle_cur", 0.0))
+            n_tgt = float(st.get("nozzle_tgt", 0.0))
+            if b_tgt > 35 and b_cur < b_tgt - 1.5:
+                self.status_pill.setText(f"🔥 HEATING BED ({b_cur:.0f}/{b_tgt:.0f}°C)")
+                self.status_pill.setStyleSheet("color: #FF9A3C; background: rgba(255, 154, 60, 0.20); border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
+                self.layer_lbl.setText(f"🔥 Heating Bed to {b_tgt:.0f}°C (current: {b_cur:.1f}°C)")
+            else:
+                self.status_pill.setText("🔥 PREPARING & HEATING")
+                self.status_pill.setStyleSheet("color: #F59E0B; background: rgba(245, 158, 11, 0.20); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
+                self.layer_lbl.setText("Starting print • Waiting for heaters...")
+        else:
+            self.status_pill.setText("🔥 STARTING & HEATING")
+            self.status_pill.setStyleSheet("color: #F59E0B; background: rgba(245, 158, 11, 0.20); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
+            self.layer_lbl.setText("Starting print • Waiting for heaters...")
 
         self.actions_stack.setCurrentIndex(0)
         self.btn_pause.setText(" ⏸  PAUSE ")
 
         # Load large thumbnail immediately
-        mr = getattr(self, "moonraker", None) or getattr(self.window(), "moonraker", None)
         host = (mr.active_host or mr.hosts[0]) if (mr and mr.hosts) else "127.0.0.1:7125"
-
         thumbs = file_info.get("thumbnails", [])
         rel_p = thumbs[0].get("relative_path") if thumbs else None
         dir_p = file_info.get("dir_path", "gcodes")
@@ -482,6 +493,21 @@ class PrintingPage(QtWidgets.QWidget):
 
         # If user just initiated a print and Klipper is preparing, keep the preview active
         if self._print_state == "starting" and state == "standby" and not fn:
+            # Still update temps even while waiting for Klipper state transition!
+            n_cur = st.get("nozzle_cur", 0.0)
+            n_tgt = st.get("nozzle_tgt", 0.0)
+            b_cur = st.get("bed_cur", 0.0)
+            b_tgt = st.get("bed_tgt", 0.0)
+            self.noz_lbl.setText(f"Nozzle: {n_cur:.1f}°C / {n_tgt:.0f}°C")
+            self.bed_lbl.setText(f"Bed: {b_cur:.1f}°C / {b_tgt:.0f}°C")
+            if b_tgt > 35 and b_cur < b_tgt - 1.5:
+                self.status_pill.setText(f"🔥 HEATING BED ({b_cur:.0f}/{b_tgt:.0f}°C)")
+                self.status_pill.setStyleSheet("color: #FF9A3C; background: rgba(255, 154, 60, 0.20); border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
+                self.layer_lbl.setText(f"🔥 Heating Bed to {b_tgt:.0f}°C (current: {b_cur:.1f}°C)")
+            elif n_tgt > 140 and n_cur < n_tgt - 2.5:
+                self.status_pill.setText(f"🔥 HEATING NOZZLE ({n_cur:.0f}/{n_tgt:.0f}°C)")
+                self.status_pill.setStyleSheet("color: #FB923C; background: rgba(251, 146, 60, 0.20); border: 1px solid #FB923C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
+                self.layer_lbl.setText(f"🔥 Heating Nozzle to {n_tgt:.0f}°C (current: {n_cur:.1f}°C)")
             return
 
         self._print_state = state
@@ -516,15 +542,6 @@ class PrintingPage(QtWidgets.QWidget):
             self.rem_val.setText("--:--:--")
             self.eta_val.setText("--:--")
 
-        # Layers
-        cur_l = st.get("current_layer")
-        tot_l = st.get("total_layer")
-        z_pos = st.get("z_pos", 0.0)
-        if cur_l is not None and tot_l is not None:
-            self.layer_lbl.setText(f"Layer: {cur_l} / {tot_l}  (Z: {z_pos:.2f} mm)")
-        else:
-            self.layer_lbl.setText(f"Z Height: {z_pos:.2f} mm")
-
         # Temps
         n_cur = st.get("nozzle_cur", 0.0)
         n_tgt = st.get("nozzle_tgt", 0.0)
@@ -532,6 +549,32 @@ class PrintingPage(QtWidgets.QWidget):
         b_tgt = st.get("bed_tgt", 0.0)
         self.noz_lbl.setText(f"Nozzle: {n_cur:.1f}°C / {n_tgt:.0f}°C")
         self.bed_lbl.setText(f"Bed: {b_cur:.1f}°C / {b_tgt:.0f}°C")
+
+        # Determine Heating & Current Activity Status
+        bed_heating = (b_tgt > 35.0 and b_cur < (b_tgt - 1.5))
+        noz_heating = (n_tgt > 140.0 and n_cur < (n_tgt - 2.5))
+        msg = st.get("message", "").strip()
+
+        # Layers & Subtitle activity text
+        cur_l = st.get("current_layer")
+        tot_l = st.get("total_layer")
+        z_pos = st.get("z_pos", 0.0)
+
+        if bed_heating and noz_heating:
+            act_text = f"🔥 Heating Bed ({b_cur:.0f}→{b_tgt:.0f}°C) & Nozzle ({n_cur:.0f}→{n_tgt:.0f}°C)"
+        elif bed_heating:
+            act_text = f"🔥 Heating Bed to {b_tgt:.0f}°C (current: {b_cur:.1f}°C)"
+        elif noz_heating:
+            act_text = f"🔥 Heating Nozzle to {n_tgt:.0f}°C (current: {n_cur:.1f}°C)"
+        elif msg:
+            act_text = f"⚡ {msg}"
+        elif cur_l is not None and tot_l is not None and tot_l > 0:
+            act_text = f"Layer: {cur_l} / {tot_l}  (Z: {z_pos:.2f} mm)"
+        elif self._print_duration > 0:
+            act_text = f"Printing • Z: {z_pos:.2f} mm"
+        else:
+            act_text = "Preparing print..."
+        self.layer_lbl.setText(act_text)
 
         # Speeds & Babystep
         spd = round(float(st.get("speed_factor", 1.0)) * 100)
@@ -543,12 +586,43 @@ class PrintingPage(QtWidgets.QWidget):
         self.babystep_lbl.setText(f"Z-Offset: {z_off:+.3f} mm")
 
         # State badge & action button switching
-        if state == "printing":
-            self.status_pill.setText("● PRINTING")
-            self.status_pill.setStyleSheet("""
-                color: #34D399; background: rgba(16, 185, 129, 0.18);
-                border: 1px solid #10B981; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
-            """)
+        if state == "printing" or self._print_state == "starting":
+            if bed_heating and noz_heating:
+                self.status_pill.setText("🔥 HEATING")
+                self.status_pill.setStyleSheet("""
+                    color: #FF9A3C; background: rgba(255, 154, 60, 0.20);
+                    border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                """)
+            elif bed_heating:
+                self.status_pill.setText(f"🔥 HEATING BED ({b_cur:.0f}/{b_tgt:.0f}°C)")
+                self.status_pill.setStyleSheet("""
+                    color: #FF9A3C; background: rgba(255, 154, 60, 0.20);
+                    border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                """)
+            elif noz_heating:
+                self.status_pill.setText(f"🔥 HEATING NOZZLE ({n_cur:.0f}/{n_tgt:.0f}°C)")
+                self.status_pill.setStyleSheet("""
+                    color: #FB923C; background: rgba(251, 146, 60, 0.20);
+                    border: 1px solid #FB923C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                """)
+            elif msg and ("hom" in msg.lower() or "prob" in msg.lower() or "mesh" in msg.lower() or "level" in msg.lower()):
+                self.status_pill.setText(f"⚡ {msg[:18].upper()}")
+                self.status_pill.setStyleSheet("""
+                    color: #38BDF8; background: rgba(56, 189, 248, 0.20);
+                    border: 1px solid #38BDF8; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                """)
+            elif self._print_duration > 0 or state == "printing":
+                self.status_pill.setText("● PRINTING")
+                self.status_pill.setStyleSheet("""
+                    color: #34D399; background: rgba(16, 185, 129, 0.18);
+                    border: 1px solid #10B981; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                """)
+            else:
+                self.status_pill.setText("● STARTING")
+                self.status_pill.setStyleSheet("""
+                    color: #F59E0B; background: rgba(245, 158, 11, 0.20);
+                    border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                """)
             self.btn_pause.setText(" ⏸  PAUSE ")
             self.actions_stack.setCurrentIndex(0)
         elif state == "paused":
