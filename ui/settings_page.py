@@ -271,8 +271,8 @@ class SettingsPage(QtWidgets.QWidget):
 
         self.vbox.addSpacing(8)
 
-        # --- Section 2: Klipper System & Host ---
-        sec2 = QtWidgets.QLabel("KLIPPER FIRMWARE & HOST")
+        # --- Section 2: Diagnostics, Firmware & Host ---
+        sec2 = QtWidgets.QLabel("DIAGNOSTICS, FIRMWARE & HOST")
         sec2.setObjectName("SettingsSecHeader")
         self.vbox.addWidget(sec2)
         self.headers.append(sec2)
@@ -282,13 +282,22 @@ class SettingsPage(QtWidgets.QWidget):
 
         self.sys_cards = []
 
+        self.tests_card = SystemOptionTile(
+            "endstop", "Printer Tests",
+            "Motor buzz checks, live endstop status & nozzle touch probe.",
+            "MOTORS \u2022 ENDSTOPS",
+            on_click=self._on_printer_tests
+        )
+        self.grid_sys.addWidget(self.tests_card, 0, 0)
+        self.sys_cards.append(self.tests_card)
+
         self.fw_info_card = SystemOptionTile(
             "firmware", "Firmware & MCU Info",
             "Installed Klipper, MCU & Moonraker versions.",
             "v0.13.0 Klipper",
             on_click=self._on_firmware_info
         )
-        self.grid_sys.addWidget(self.fw_info_card, 0, 0)
+        self.grid_sys.addWidget(self.fw_info_card, 0, 1)
         self.sys_cards.append(self.fw_info_card)
 
         disp_card = SystemOptionTile(
@@ -297,7 +306,7 @@ class SettingsPage(QtWidgets.QWidget):
             "100% Brightness",
             on_click=self._on_display_info
         )
-        self.grid_sys.addWidget(disp_card, 0, 1)
+        self.grid_sys.addWidget(disp_card, 1, 0)
         self.sys_cards.append(disp_card)
 
         self.grid_sys.setColumnStretch(0, 1)
@@ -390,6 +399,15 @@ class SettingsPage(QtWidgets.QWidget):
         view = CalibrationDialog(item, scale=self._scale, parent=self)
         if hasattr(main_win, "open_sub_screen"):
             main_win.open_sub_screen(view, title=item.get("title", "Settings"), return_page="settings")
+        else:
+            view.show()
+
+    def _on_printer_tests(self, tile):
+        main_win = self.window()
+        from .printer_tests_page import PrinterTestsScreen
+        view = PrinterTestsScreen(scale=self._scale, parent=main_win)
+        if hasattr(main_win, "open_sub_screen"):
+            main_win.open_sub_screen(view, title="Printer Tests", return_page="settings")
         else:
             view.show()
 

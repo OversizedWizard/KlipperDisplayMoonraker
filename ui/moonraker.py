@@ -833,3 +833,70 @@ class MoonrakerClient(QtCore.QObject):
             self.save_printer_cfg(new_content, on_done=_on_saved)
 
         self.get_printer_cfg(on_done=_on_cfg)
+
+    def stepper_buzz(self, stepper: str, on_done=None):
+        """Oscillate a given stepper motor (±1mm back and forth) using STEPPER_BUZZ."""
+        self.send_gcode(f"STEPPER_BUZZ STEPPER={stepper}", on_done=on_done, timeout=20.0)
+
+    def query_diagnostics_status(self, on_done=None, query_hw_endstops: bool = True):
+        """Fetch live endstop states, load cell probe force/trigger state, and stepper enable flags."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _run():
+            res = {
+                "endstops": {},
+                "has_load_cell": self.has_load_cell(),
+                "force_g": 0.0,
+                "min_force_g": 0.0,
+                "max_force_g": 0.0,
+                "trigger_force": 60.0,
+                "probe_closed": False,
+                "steppers_enabled": {},
+            }
+            try:
+                #Configured trigger_force from printer.cfg if available
+                lcp_cfg = (self.config_settings or {}).get("load_cell_probe", {})
+                if isinstance(lcp_cfg, dict) and lcp_cfg.get("trigger_force") is not None:
+                    res["trigger_force"] = float(lcp_cfg.get("trigger_force", 60.0))
+
+                if query_hw_endstops:
+                    es_data = self._fetch_json(host, "/printer/query_endstops/status", timeout=2.0)
+                    if es_data and "result" in es_data and isinstance(es_data["result"], dict):
+                        res["endstops"] = dict(es_data["result"])
+
+                obj_data = self._fetch_json(
+                    host,
+                    "/printer/objects/query?query_endstops&load_cell_probe&load_cell&probe&stepper_enable",
+                    timeout=2.0
+                )
+                if obj_data and "result" in obj_data:
+                    st = obj_data["result"].get("status", {})
+                    if not res["endstops"]:
+                        lq = (st.get("query_endstops") or {}).get("last_query") or {}
+                        for k, v in lq.items():
+                            res["endstops"][k] = "TRIGGERED" if v else "open"
+
+                    se = (st.get("stepper_enable") or {}).get("steppers") or {}
+                    res["steppers_enabled"] = dict(se)
+
+                    lcp = st.get("load_cell_probe") or st.get("load_cell") or {}
+                    prb = st.get("probe") or {}
+                    if lcp or prb.get("name") == "load_cell_probe":
+                        res["has_load_cell"] = True
+                        src = lcp if lcp else prb
+                        fg = float(src.get("force_g", 0.0) or 0.0)
+                        min_fg = float(src.get("min_force_g", fg) or fg)
+                        max_fg = float(src.get("max_force_g", fg) or fg)
+                        res["force_g"] = fg
+                        res["min_force_g"] = min_fg
+                        res["max_force_g"] = max_fg
+                        if bool(src.get("last_query", False)):
+                            res["probe_closed"] = True
+            except Exception:
+                pass
+
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(res))
+
+        threading.Thread(target=_run, daemon=True).start()
+
