@@ -323,6 +323,8 @@ class MainWindow(QtWidgets.QWidget):
         self.moonraker.coords_updated.connect(self.pages["home"].update_coords)
         self.moonraker.load_cell_updated.connect(self.topbar.set_probe_force)
         self.moonraker.print_stats_updated.connect(self._on_print_stats_updated)
+        if hasattr(self.pages.get("home"), "update_bed_mesh"):
+            self.moonraker.bed_mesh_updated.connect(self.pages["home"].update_bed_mesh)
 
         # Debounce re-scaling while the window is being resized.
         self._resize_timer = QtCore.QTimer(self)
@@ -354,6 +356,8 @@ class MainWindow(QtWidgets.QWidget):
             self.topbar.set_load_cell_visible(False)
 
     def _on_config_loaded(self, config: dict, objects: list):
+        if hasattr(self.pages.get("home"), "update_config"):
+            self.pages["home"].update_config(config, objects)
         if hasattr(self.pages.get("calibrate"), "update_config"):
             self.pages["calibrate"].update_config(config, objects)
         if hasattr(self.pages.get("settings"), "update_config"):

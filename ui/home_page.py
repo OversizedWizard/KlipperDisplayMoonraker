@@ -175,6 +175,8 @@ class HomePage(QtWidgets.QWidget):
         self._coords = {"X": 0.0, "Y": 0.0, "Z": 0.0}
         self._homed = ""
         self._homing_busy = False
+        self._mesh_configured = True
+        self._mesh_active = False
         self._homing_timer = QtCore.QTimer(self)
         self._homing_timer.setSingleShot(True)
         self._homing_timer.timeout.connect(lambda: self._set_homing_lock(False))
@@ -377,6 +379,12 @@ class HomePage(QtWidgets.QWidget):
         self.btn_home_all.clicked.connect(self._on_home_all)
         self.bottom_bar.addWidget(self.btn_home_all, 1)
 
+        self.btn_bed_mesh = QtWidgets.QPushButton("⊞  Mesh Level: OFF")
+        self.btn_bed_mesh.setObjectName("BedMeshBtn")
+        self.btn_bed_mesh.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_bed_mesh.clicked.connect(self._on_toggle_bed_mesh)
+        self.bottom_bar.addWidget(self.btn_bed_mesh, 1)
+
         self.btn_motors_off = QtWidgets.QPushButton("\u26A1  Turn Off Motors (M84)")
         self.btn_motors_off.setObjectName("MotorsOffBtn")
         self.btn_motors_off.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -478,6 +486,91 @@ class HomePage(QtWidgets.QWidget):
             mr.motors_off()
         QtCore.QTimer.singleShot(1400, lambda: self.btn_motors_off.setText("\u26A1  Turn Off Motors (M84)"))
 
+    def update_config(self, config: dict, objects: list):
+        """Called when Moonraker loads Klipper configuration. Checks if bed_mesh is enabled or commented out."""
+        self._mesh_configured = ("bed_mesh" in config) or ("bed_mesh" in objects)
+        self._update_mesh_button_ui()
+
+    def update_bed_mesh(self, bm: dict):
+        """Called whenever Moonraker emits live bed_mesh status."""
+        profile = bm.get("profile_name", "")
+        self._mesh_active = bool(profile)
+        self._update_mesh_button_ui()
+
+    def _on_toggle_bed_mesh(self):
+        """Toggle bed mesh leveling on/off."""
+        main_win = self.window()
+        mr = getattr(main_win, "moonraker", None)
+        if not self._mesh_configured:
+            self.btn_bed_mesh.setText("⊞  Disabled in cfg")
+            QtCore.QTimer.singleShot(1800, self._update_mesh_button_ui)
+            return
+
+        if self._mesh_active:
+            # Active -> Clear bed mesh
+            if mr and mr.connected:
+                mr.send_gcode("BED_MESH_CLEAR")
+            self._mesh_active = False
+        else:
+            # Disabled -> Load default bed mesh
+            if mr and mr.connected:
+                mr.send_gcode("BED_MESH_PROFILE LOAD=default")
+            self._mesh_active = True
+
+        self._update_mesh_button_ui()
+
+    def _update_mesh_button_ui(self):
+        s = getattr(self, "_scale", 1.0)
+        if not self._mesh_configured:
+            self.btn_bed_mesh.setText("⊞  Mesh: Disabled (cfg)")
+            self.btn_bed_mesh.setStyleSheet(f"""
+                QPushButton#BedMeshBtn {{
+                    background: rgba(239, 68, 68, 0.10);
+                    color: #EF4444;
+                    border: 1px dashed rgba(239, 68, 68, 0.5);
+                    border-radius: {_s(8, s)}px;
+                    font-size: {_s(11, s)}px;
+                    font-weight: 700;
+                    padding: 0 {_s(6, s)}px;
+                }}
+            """)
+        elif self._mesh_active:
+            self.btn_bed_mesh.setText("⊞  Mesh Level: ON")
+            self.btn_bed_mesh.setStyleSheet(f"""
+                QPushButton#BedMeshBtn {{
+                    background: rgba(16, 185, 129, 0.20);
+                    color: #34D399;
+                    border: 1.5px solid #10B981;
+                    border-radius: {_s(8, s)}px;
+                    font-size: {_s(12, s)}px;
+                    font-weight: 800;
+                    padding: 0 {_s(6, s)}px;
+                }}
+                QPushButton#BedMeshBtn:hover {{
+                    background: rgba(16, 185, 129, 0.35);
+                    border-color: #34D399;
+                    color: #FFFFFF;
+                }}
+            """)
+        else:
+            self.btn_bed_mesh.setText("⊞  Mesh Level: OFF")
+            self.btn_bed_mesh.setStyleSheet(f"""
+                QPushButton#BedMeshBtn {{
+                    background: rgba(239, 68, 68, 0.16);
+                    color: #F87171;
+                    border: 1.5px solid #EF4444;
+                    border-radius: {_s(8, s)}px;
+                    font-size: {_s(12, s)}px;
+                    font-weight: 800;
+                    padding: 0 {_s(6, s)}px;
+                }}
+                QPushButton#BedMeshBtn:hover {{
+                    background: rgba(239, 68, 68, 0.28);
+                    border-color: #F87171;
+                    color: #FFFFFF;
+                }}
+            """)
+
     def update_temps(self, nozzle_cur: float, nozzle_tgt: float, bed_cur: float, bed_tgt: float):
         self.nozzle.set_temps(nozzle_cur, nozzle_tgt)
         self.bed.set_temps(bed_cur, bed_tgt)
@@ -557,3 +650,6 @@ class HomePage(QtWidgets.QWidget):
         self.btn_home_all.setIcon(icons.icon("home", _s(18, s)))
         self.btn_home_all.setIconSize(QtCore.QSize(_s(18, s), _s(18, s)))
         self.btn_motors_off.setFixedHeight(action_btn_h)
+        if hasattr(self, "btn_bed_mesh"):
+            self.btn_bed_mesh.setFixedHeight(action_btn_h)
+            self._update_mesh_button_ui()

@@ -33,6 +33,8 @@ class MoonrakerClient(QtCore.QObject):
     firmware_info_updated = Signal(dict)
     # (print_stats: dict) - live printing state, progress, durations, layers, and factors
     print_stats_updated = Signal(dict)
+    # (bed_mesh: dict) - live bed mesh profile_name, mesh matrices, and profiles
+    bed_mesh_updated = Signal(dict)
     # Internal cross-thread dispatcher to execute callbacks safely on Qt GUI thread
     _dispatch_signal = Signal(object)
 
@@ -61,6 +63,7 @@ class MoonrakerClient(QtCore.QObject):
             "state": "ready"
         }
         self.last_print_stats: dict = {}
+        self.last_bed_mesh: dict = {}
         self._busy = False
         self._dispatch_signal.connect(lambda fn: fn())
 
@@ -103,7 +106,7 @@ class MoonrakerClient(QtCore.QObject):
                 if h not in candidates:
                     candidates.append(h)
 
-            query_path = "/printer/objects/query?extruder&heater_bed&webhooks&toolhead&gcode_move&load_cell_probe&load_cell&probe&print_stats&virtual_sdcard&display_status&fan"
+            query_path = "/printer/objects/query?extruder&heater_bed&webhooks&toolhead&gcode_move&load_cell_probe&load_cell&probe&print_stats&virtual_sdcard&display_status&fan&bed_mesh"
             for host in candidates:
                 try:
                     data = self._fetch_json(host, query_path, timeout=1.2)
@@ -198,6 +201,11 @@ class MoonrakerClient(QtCore.QObject):
                         }
                         self.last_print_stats = stats_dict
                         self.print_stats_updated.emit(stats_dict)
+
+                        bm_obj = status.get("bed_mesh")
+                        if bm_obj is not None:
+                            self.last_bed_mesh = bm_obj
+                            self.bed_mesh_updated.emit(bm_obj)
                         if force_val is not None:
                             self.load_cell_updated.emit(force_val)
                         return

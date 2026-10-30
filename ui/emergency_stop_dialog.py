@@ -1,5 +1,6 @@
 """Touch-friendly modal overlay for immediate emergency stop (M112) with green Firmware Restart action.
 
+All elements (icons, titles, subtitles, messages, and action buttons) are completely centered.
 Renders directly within the MainWindow as a dimmed modal overlay with zero window-manager dependencies.
 """
 
@@ -42,43 +43,41 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
         """)
 
         card_layout = QtWidgets.QVBoxLayout(self.card)
-        card_layout.setContentsMargins(_s(24, scale), _s(22, scale), _s(24, scale), _s(22, scale))
-        card_layout.setSpacing(_s(16, scale))
+        card_layout.setContentsMargins(_s(24, scale), _s(24, scale), _s(24, scale), _s(24, scale))
+        card_layout.setSpacing(_s(14, scale))
+        card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Header with icon and title
-        header_layout = QtWidgets.QHBoxLayout()
-        header_layout.setSpacing(_s(12, scale))
-
+        # Header with icon and title - ALL CENTERED
         self.icon_lbl = QtWidgets.QLabel()
-        self.icon_lbl.setPixmap(icons.pixmap("estop", _s(36, scale)))
-        header_layout.addWidget(self.icon_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_lbl.setPixmap(icons.pixmap("estop", _s(40, scale)))
+        card_layout.addWidget(self.icon_lbl, 0, Qt.AlignmentFlag.AlignCenter)
 
-        title_box = QtWidgets.QVBoxLayout()
-        title_box.setSpacing(2)
         self.title_lbl = QtWidgets.QLabel("EMERGENCY STOP")
-        self.title_lbl.setStyleSheet(f"color: #EF4444; font-size: {_s(17, scale)}px; font-weight: 900; letter-spacing: 0.8px;")
+        self.title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_lbl.setStyleSheet(f"color: #EF4444; font-size: {_s(18, scale)}px; font-weight: 900; letter-spacing: 0.8px;")
+        card_layout.addWidget(self.title_lbl, 0, Qt.AlignmentFlag.AlignCenter)
+
         self.sub_title = QtWidgets.QLabel("Klipper Firmware Halt (M112)")
+        self.sub_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.sub_title.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 700;")
-        title_box.addWidget(self.title_lbl)
-        title_box.addWidget(self.sub_title)
-        header_layout.addLayout(title_box)
-        header_layout.addStretch(1)
+        card_layout.addWidget(self.sub_title, 0, Qt.AlignmentFlag.AlignCenter)
 
-        card_layout.addLayout(header_layout)
-
-        # Message
+        # Message - ALL CENTERED
         self.msg_lbl = QtWidgets.QLabel(
             "Are you sure you want to trigger an immediate emergency stop?\n\n"
             "This will instantly cut off all heaters, halt all stepper motors, "
             "and terminate the current print job."
         )
+        self.msg_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.msg_lbl.setWordWrap(True)
-        self.msg_lbl.setStyleSheet(f"color: #E2E8F0; font-size: {_s(12, scale)}px; line-height: 1.45;")
-        card_layout.addWidget(self.msg_lbl)
+        self.msg_lbl.setStyleSheet(f"color: #E2E8F0; font-size: {_s(12, scale)}px; line-height: 1.5;")
+        card_layout.addWidget(self.msg_lbl, 0, Qt.AlignmentFlag.AlignCenter)
 
-        # Buttons Row
+        # Buttons Row - CENTERED
         self.btn_layout = QtWidgets.QHBoxLayout()
         self.btn_layout.setSpacing(_s(12, scale))
+        self.btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.btn_cancel = QtWidgets.QPushButton("Cancel")
         self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -128,8 +127,8 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
         """)
         self.btn_action.clicked.connect(self._on_halt_clicked)
 
-        self.btn_layout.addWidget(self.btn_cancel, 1)
-        self.btn_layout.addWidget(self.btn_action, 2)
+        self.btn_layout.addWidget(self.btn_cancel)
+        self.btn_layout.addWidget(self.btn_action)
         card_layout.addLayout(self.btn_layout)
 
         outer.addWidget(self.card)
@@ -151,8 +150,11 @@ class EmergencyStopOverlay(QtWidgets.QFrame):
             }}
         """)
         self.title_lbl.setText("PRINTER HALTED (M112)")
-        self.title_lbl.setStyleSheet(f"color: #EF4444; font-size: {_s(17, self.scale)}px; font-weight: 900; letter-spacing: 0.8px;")
+        self.title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_lbl.setStyleSheet(f"color: #EF4444; font-size: {_s(18, self.scale)}px; font-weight: 900; letter-spacing: 0.8px;")
+
         self.sub_title.setText("All Heaters & Stepper Motors Cut Off")
+        self.sub_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.msg_lbl.setText(
             "Emergency stop executed successfully.\n"
