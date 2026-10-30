@@ -1,6 +1,7 @@
-"""Touch-friendly modal overlay for in-flight fine tuning (Z-offset babystep, speed, flow, fan).
+"""Touch-friendly modal overlay for in-flight fine tuning with 4 columns (Z-offset, Speed, Flow, Fan).
 
-Renders directly within the MainWindow as a dimmed modal overlay with zero window-manager dependencies.
+Each column features dedicated Up / Down arrow buttons, prominent live readouts, and quick-reset capabilities.
+Renders directly within the MainWindow as a dimmed modal overlay on 800x480 screens.
 """
 
 from .qt import QtWidgets, QtCore, Qt, Signal
@@ -12,7 +13,7 @@ def _s(v: float, s: float) -> int:
 
 
 class FineTuneOverlay(QtWidgets.QFrame):
-    """Modal overlay allowing quick on-the-fly tuning during 3D printing."""
+    """Modal overlay with 4 vertical columns and up/down arrows for Z-offset, speed, flow, and fan."""
     closed = Signal()
 
     def __init__(self, parent=None, scale: float = 1.0):
@@ -33,7 +34,7 @@ class FineTuneOverlay(QtWidgets.QFrame):
         self._flow_pct = 100
         self._fan_pct = 0
 
-        # Read initial from moonraker last_print_stats if available
+        # Read initial values from Moonraker if available
         if self._moonraker and hasattr(self._moonraker, "last_print_stats") and self._moonraker.last_print_stats:
             st = self._moonraker.last_print_stats
             self._z_offset = float(st.get("z_offset", 0.0))
@@ -45,7 +46,7 @@ class FineTuneOverlay(QtWidgets.QFrame):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Card container
+        # Main Card Container
         self.card = QtWidgets.QFrame(self)
         self.card.setObjectName("FineTuneCard")
         self.card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -58,20 +59,20 @@ class FineTuneOverlay(QtWidgets.QFrame):
         """)
 
         card_layout = QtWidgets.QVBoxLayout(self.card)
-        card_layout.setContentsMargins(_s(20, scale), _s(16, scale), _s(20, scale), _s(16, scale))
-        card_layout.setSpacing(_s(12, scale))
+        card_layout.setContentsMargins(_s(16, scale), _s(12, scale), _s(16, scale), _s(12, scale))
+        card_layout.setSpacing(_s(10, scale))
 
-        # Header
+        # --- Top Header Bar ---
         hdr = QtWidgets.QHBoxLayout()
         hdr_icon = QtWidgets.QLabel()
-        hdr_icon.setPixmap(icons.pixmap("tune", _s(24, scale)))
+        hdr_icon.setPixmap(icons.pixmap("tune", _s(22, scale)))
         hdr.addWidget(hdr_icon, 0, Qt.AlignmentFlag.AlignVCenter)
 
         title_box = QtWidgets.QVBoxLayout()
         title_box.setSpacing(1)
         t_lbl = QtWidgets.QLabel("FINE TUNE PRINT")
-        t_lbl.setStyleSheet(f"color: #00E5FF; font-size: {_s(15, scale)}px; font-weight: 900; letter-spacing: 0.8px;")
-        sub_lbl = QtWidgets.QLabel("Live Z-Babystep, Speed, Flow & Fan Overrides")
+        t_lbl.setStyleSheet(f"color: #00E5FF; font-size: {_s(14, scale)}px; font-weight: 900; letter-spacing: 0.6px;")
+        sub_lbl = QtWidgets.QLabel("4-Channel Tuning: Z-Babystep, Print Speed, Flow & Fan")
         sub_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(10, scale)}px; font-weight: 600;")
         title_box.addWidget(t_lbl)
         title_box.addWidget(sub_lbl)
@@ -80,14 +81,14 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
         close_btn = QtWidgets.QPushButton("✕")
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setFixedSize(_s(32, scale), _s(32, scale))
+        close_btn.setFixedSize(_s(30, scale), _s(30, scale))
         close_btn.setStyleSheet(f"""
             QPushButton {{
                 background: rgba(255, 255, 255, 0.08);
                 color: #CBD5E1;
                 border: 1px solid rgba(255, 255, 255, 0.15);
-                border-radius: {_s(16, scale)}px;
-                font-size: {_s(14, scale)}px;
+                border-radius: {_s(15, scale)}px;
+                font-size: {_s(13, scale)}px;
                 font-weight: 800;
             }}
             QPushButton:hover {{ background: rgba(239, 68, 68, 0.4); color: #FFFFFF; border-color: #EF4444; }}
@@ -97,107 +98,76 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
         card_layout.addLayout(hdr)
 
-        # Content container
-        content_box = QtWidgets.QVBoxLayout()
-        content_box.setSpacing(_s(10, scale))
+        # --- 4 Columns Row ---
+        cols_row = QtWidgets.QHBoxLayout()
+        cols_row.setSpacing(_s(10, scale))
 
-        # --- Section 1: Z-Offset Babystepping ---
-        z_box = QtWidgets.QFrame()
-        z_box.setStyleSheet(f"background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: {_s(10, scale)}px;")
-        z_lay = QtWidgets.QVBoxLayout(z_box)
-        z_lay.setContentsMargins(_s(12, scale), _s(8, scale), _s(12, scale), _s(8, scale))
-        z_lay.setSpacing(_s(8, scale))
+        # =========================================================================
+        # Column 1: Z-OFFSET BABYSTEP
+        # =========================================================================
+        col1 = self._build_column(
+            scale=scale,
+            title="Z-OFFSET",
+            accent_color="#00E5FF",
+            up_labels=[("▲ +0.05", lambda: self._on_z_adjust(+0.05)), ("▲ +0.01", lambda: self._on_z_adjust(+0.01))],
+            down_labels=[("▼ -0.01", lambda: self._on_z_adjust(-0.01)), ("▼ -0.05", lambda: self._on_z_adjust(-0.05))],
+            initial_val=f"{self._z_offset:+.3f} mm",
+            on_reset=lambda: self._on_z_reset()
+        )
+        self.z_val_lbl = col1["val_lbl"]
+        cols_row.addWidget(col1["frame"], 1)
 
-        z_title_row = QtWidgets.QHBoxLayout()
-        z_title = QtWidgets.QLabel("Z-OFFSET BABYSTEP")
-        z_title.setStyleSheet(f"color: #F8FAFC; font-size: {_s(11, scale)}px; font-weight: 800;")
-        self.z_val_lbl = QtWidgets.QLabel(f"{self._z_offset:+.3f} mm")
-        self.z_val_lbl.setStyleSheet(f"color: #00E5FF; font-size: {_s(13, scale)}px; font-weight: 900; font-family: monospace;")
-        z_title_row.addWidget(z_title)
-        z_title_row.addStretch(1)
-        z_title_row.addWidget(self.z_val_lbl)
-        z_lay.addLayout(z_title_row)
+        # =========================================================================
+        # Column 2: PRINT SPEED
+        # =========================================================================
+        col2 = self._build_column(
+            scale=scale,
+            title="SPEED",
+            accent_color="#38BDF8",
+            up_labels=[("▲ +10%", lambda: self._on_speed_adjust(+10)), ("▲ +5%", lambda: self._on_speed_adjust(+5))],
+            down_labels=[("▼ -5%", lambda: self._on_speed_adjust(-5)), ("▼ -10%", lambda: self._on_speed_adjust(-10))],
+            initial_val=f"{self._speed_pct}%",
+            on_reset=lambda: self._on_speed_adjust(100)
+        )
+        self.spd_val_lbl = col2["val_lbl"]
+        cols_row.addWidget(col2["frame"], 1)
 
-        z_btn_row = QtWidgets.QHBoxLayout()
-        z_btn_row.setSpacing(_s(8, scale))
-        for delta, label in [(-0.05, "▼ -0.05"), (-0.01, "▼ -0.01"), (+0.01, "▲ +0.01"), (+0.05, "▲ +0.05")]:
-            btn = QtWidgets.QPushButton(label)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedHeight(_s(34, scale))
-            btn.setStyleSheet(self._btn_style(scale, is_accent=(delta > 0)))
-            btn.clicked.connect(lambda ch, d=delta: self._on_z_adjust(d))
-            z_btn_row.addWidget(btn)
-        z_lay.addLayout(z_btn_row)
-        content_box.addWidget(z_box)
+        # =========================================================================
+        # Column 3: EXTRUSION FLOW
+        # =========================================================================
+        col3 = self._build_column(
+            scale=scale,
+            title="FLOW",
+            accent_color="#34D399",
+            up_labels=[("▲ +5%", lambda: self._on_flow_adjust(+5)), ("▲ +1%", lambda: self._on_flow_adjust(+1))],
+            down_labels=[("▼ -1%", lambda: self._on_flow_adjust(-1)), ("▼ -5%", lambda: self._on_flow_adjust(-5))],
+            initial_val=f"{self._flow_pct}%",
+            on_reset=lambda: self._on_flow_adjust(100)
+        )
+        self.flow_val_lbl = col3["val_lbl"]
+        cols_row.addWidget(col3["frame"], 1)
 
-        # --- Section 2: Speed, Flow & Fan Overrides ---
-        sf_box = QtWidgets.QFrame()
-        sf_box.setStyleSheet(f"background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: {_s(10, scale)}px;")
-        sf_lay = QtWidgets.QVBoxLayout(sf_box)
-        sf_lay.setContentsMargins(_s(12, scale), _s(10, scale), _s(12, scale), _s(10, scale))
-        sf_lay.setSpacing(_s(8, scale))
+        # =========================================================================
+        # Column 4: COOLING FAN
+        # =========================================================================
+        col4 = self._build_column(
+            scale=scale,
+            title="FAN",
+            accent_color="#C084FC",
+            up_labels=[("▲ +25%", lambda: self._on_fan_adjust(+25)), ("▲ +10%", lambda: self._on_fan_adjust(+10))],
+            down_labels=[("▼ -10%", lambda: self._on_fan_adjust(-10)), ("▼ -25%", lambda: self._on_fan_adjust(-25))],
+            initial_val=f"{self._fan_pct}%",
+            on_reset=lambda: self._on_fan_toggle()
+        )
+        self.fan_val_lbl = col4["val_lbl"]
+        cols_row.addWidget(col4["frame"], 1)
 
-        # Speed Row
-        spd_row = QtWidgets.QHBoxLayout()
-        spd_lbl = QtWidgets.QLabel("PRINT SPEED:")
-        spd_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 700;")
-        self.spd_val_lbl = QtWidgets.QLabel(f"{self._speed_pct}%")
-        self.spd_val_lbl.setStyleSheet(f"color: #38BDF8; font-size: {_s(12, scale)}px; font-weight: 900;")
-        spd_row.addWidget(spd_lbl)
-        spd_row.addWidget(self.spd_val_lbl)
-        spd_row.addStretch(1)
-        for diff, lbl in [(-10, "-10%"), (-5, "-5%"), (100, "100%"), (+5, "+5%"), (+10, "+10%")]:
-            b = QtWidgets.QPushButton(lbl)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(_s(30, scale))
-            b.setStyleSheet(self._btn_style(scale, is_accent=(diff == 100)))
-            b.clicked.connect(lambda ch, d=diff: self._on_speed_adjust(d))
-            spd_row.addWidget(b)
-        sf_lay.addLayout(spd_row)
+        card_layout.addLayout(cols_row)
 
-        # Flow Row
-        flow_row = QtWidgets.QHBoxLayout()
-        flow_lbl = QtWidgets.QLabel("EXTRUSION FLOW:")
-        flow_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 700;")
-        self.flow_val_lbl = QtWidgets.QLabel(f"{self._flow_pct}%")
-        self.flow_val_lbl.setStyleSheet(f"color: #34D399; font-size: {_s(12, scale)}px; font-weight: 900;")
-        flow_row.addWidget(flow_lbl)
-        flow_row.addWidget(self.flow_val_lbl)
-        flow_row.addStretch(1)
-        for diff, lbl in [(-5, "-5%"), (-1, "-1%"), (100, "100%"), (+1, "+1%"), (+5, "+5%")]:
-            b = QtWidgets.QPushButton(lbl)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(_s(30, scale))
-            b.setStyleSheet(self._btn_style(scale, is_accent=(diff == 100)))
-            b.clicked.connect(lambda ch, d=diff: self._on_flow_adjust(d))
-            flow_row.addWidget(b)
-        sf_lay.addLayout(flow_row)
-
-        # Fan Row
-        fan_row = QtWidgets.QHBoxLayout()
-        fan_lbl = QtWidgets.QLabel("COOLING FAN:")
-        fan_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 700;")
-        self.fan_val_lbl = QtWidgets.QLabel(f"{self._fan_pct}%")
-        self.fan_val_lbl.setStyleSheet(f"color: #C084FC; font-size: {_s(12, scale)}px; font-weight: 900;")
-        fan_row.addWidget(fan_lbl)
-        fan_row.addWidget(self.fan_val_lbl)
-        fan_row.addStretch(1)
-        for pct, lbl in [(0, "OFF"), (25, "25%"), (50, "50%"), (75, "75%"), (100, "100%")]:
-            b = QtWidgets.QPushButton(lbl)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(_s(30, scale))
-            b.setStyleSheet(self._btn_style(scale, is_accent=(pct == self._fan_pct)))
-            b.clicked.connect(lambda ch, p=pct: self._on_fan_set(p))
-            fan_row.addWidget(b)
-        sf_lay.addLayout(fan_row)
-
-        content_box.addWidget(sf_box)
-        card_layout.addLayout(content_box)
-
-        # Done button
-        done_btn = QtWidgets.QPushButton("DONE / CLOSE")
+        # --- Done / Close Button ---
+        done_btn = QtWidgets.QPushButton("DONE / RETURN TO PRINT")
         done_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        done_btn.setFixedHeight(_s(38, scale))
+        done_btn.setFixedHeight(_s(36, scale))
         done_btn.setStyleSheet(f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00E5FF, stop:1 #3B82F6);
@@ -220,54 +190,102 @@ class FineTuneOverlay(QtWidgets.QFrame):
         card_layout.addWidget(done_btn)
 
         outer.addWidget(self.card)
-        self.card.setFixedWidth(_s(500, scale))
+        self.card.setFixedWidth(_s(650, scale))
 
-    def _btn_style(self, scale: float, is_accent: bool = False) -> str:
-        if is_accent:
-            return f"""
-                QPushButton {{
-                    background: rgba(0, 229, 255, 0.18);
-                    color: #00E5FF;
-                    border: 1px solid rgba(0, 229, 255, 0.5);
-                    border-radius: {_s(6, scale)}px;
-                    font-size: {_s(11, scale)}px;
-                    font-weight: 800;
-                    padding: 0 {_s(10, scale)}px;
-                }}
-                QPushButton:hover {{
-                    background: rgba(0, 229, 255, 0.35);
-                    border-color: #00E5FF;
-                }}
-                QPushButton:pressed {{
-                    background: #00E5FF;
-                    color: #0F172A;
-                }}
-            """
-        else:
-            return f"""
-                QPushButton {{
-                    background: rgba(255, 255, 255, 0.08);
-                    color: #F1F5F9;
-                    border: 1px solid rgba(255, 255, 255, 0.18);
-                    border-radius: {_s(6, scale)}px;
-                    font-size: {_s(11, scale)}px;
-                    font-weight: 700;
-                    padding: 0 {_s(10, scale)}px;
-                }}
-                QPushButton:hover {{
-                    background: rgba(255, 255, 255, 0.16);
-                    border-color: rgba(255, 255, 255, 0.35);
-                }}
-                QPushButton:pressed {{
-                    background: rgba(255, 255, 255, 0.3);
-                }}
-            """
+    def _build_column(self, scale: float, title: str, accent_color: str, up_labels: list, down_labels: list, initial_val: str, on_reset) -> dict:
+        """Helper to build a standardized column with up arrows, value display, and down arrows."""
+        frame = QtWidgets.QFrame()
+        frame.setStyleSheet(f"""
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: {_s(10, scale)}px;
+        """)
+        lay = QtWidgets.QVBoxLayout(frame)
+        lay.setContentsMargins(_s(8, scale), _s(8, scale), _s(8, scale), _s(8, scale))
+        lay.setSpacing(_s(5, scale))
+
+        # Title
+        t_lbl = QtWidgets.QLabel(title)
+        t_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        t_lbl.setStyleSheet(f"color: {accent_color}; font-size: {_s(11, scale)}px; font-weight: 900; letter-spacing: 0.5px;")
+        lay.addWidget(t_lbl)
+
+        # Up Buttons
+        for text, fn in up_labels:
+            btn = QtWidgets.QPushButton(text)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(_s(32, scale))
+            btn.setStyleSheet(self._arrow_btn_style(scale, is_up=True))
+            btn.clicked.connect(fn)
+            lay.addWidget(btn)
+
+        # Center Value Readout (clickable to reset)
+        val_lbl = QtWidgets.QLabel(initial_val)
+        val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        val_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        val_lbl.setFixedHeight(_s(36, scale))
+        val_lbl.setStyleSheet(f"""
+            background: rgba(0, 0, 0, 0.35);
+            color: #FFFFFF;
+            border: 1.5px solid {accent_color};
+            border-radius: {_s(6, scale)}px;
+            font-size: {_s(13, scale)}px;
+            font-weight: 900;
+            font-family: monospace;
+        """)
+        val_lbl.mousePressEvent = lambda e: on_reset()
+        val_lbl.setToolTip("Tap to reset")
+        lay.addWidget(val_lbl)
+
+        # Down Buttons
+        for text, fn in down_labels:
+            btn = QtWidgets.QPushButton(text)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(_s(32, scale))
+            btn.setStyleSheet(self._arrow_btn_style(scale, is_up=False))
+            btn.clicked.connect(fn)
+            lay.addWidget(btn)
+
+        return {"frame": frame, "val_lbl": val_lbl}
+
+    def _arrow_btn_style(self, scale: float, is_up: bool) -> str:
+        border_col = "rgba(0, 229, 255, 0.35)" if is_up else "rgba(255, 255, 255, 0.15)"
+        text_col = "#00E5FF" if is_up else "#CBD5E1"
+        bg_col = "rgba(0, 229, 255, 0.10)" if is_up else "rgba(255, 255, 255, 0.06)"
+        hover_bg = "rgba(0, 229, 255, 0.25)" if is_up else "rgba(255, 255, 255, 0.16)"
+
+        return f"""
+            QPushButton {{
+                background: {bg_col};
+                color: {text_col};
+                border: 1px solid {border_col};
+                border-radius: {_s(6, scale)}px;
+                font-size: {_s(11, scale)}px;
+                font-weight: 800;
+                padding: 0 {_s(4, scale)}px;
+            }}
+            QPushButton:hover {{
+                background: {hover_bg};
+                border-color: #00E5FF;
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: #00E5FF;
+                color: #0F172A;
+            }}
+        """
 
     def _on_z_adjust(self, delta: float):
         self._z_offset += delta
         self.z_val_lbl.setText(f"{self._z_offset:+.3f} mm")
         if self._moonraker:
             self._moonraker.adjust_z_offset(delta)
+
+    def _on_z_reset(self):
+        # Reset Z-offset babystep back to 0
+        diff = -self._z_offset
+        if abs(diff) > 0.0001:
+            self._on_z_adjust(diff)
 
     def _on_speed_adjust(self, val: int):
         if val == 100:
@@ -287,11 +305,17 @@ class FineTuneOverlay(QtWidgets.QFrame):
         if self._moonraker:
             self._moonraker.set_flow_factor(self._flow_pct)
 
-    def _on_fan_set(self, pct: int):
-        self._fan_pct = pct
-        self.fan_val_lbl.setText(f"{pct}%")
+    def _on_fan_adjust(self, val: int):
+        self._fan_pct = max(0, min(100, self._fan_pct + val))
+        self.fan_val_lbl.setText(f"{self._fan_pct}%")
         if self._moonraker:
-            self._moonraker.set_fan_speed(pct)
+            self._moonraker.set_fan_speed(self._fan_pct)
+
+    def _on_fan_toggle(self):
+        self._fan_pct = 0 if self._fan_pct > 0 else 100
+        self.fan_val_lbl.setText(f"{self._fan_pct}%")
+        if self._moonraker:
+            self._moonraker.set_fan_speed(self._fan_pct)
 
     def close(self):
         super().close()
