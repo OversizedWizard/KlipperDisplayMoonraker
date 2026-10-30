@@ -225,6 +225,380 @@ class SettingsInfoView(QtWidgets.QFrame):
         lay.addLayout(bot)
 
 
+class LiveSystemLoadsView(QtWidgets.QFrame):
+    """Live System Loads & Firmware Telemetry view (matches Mainsail/Fluidd System Loads panel)."""
+    closed = Signal()
+
+    def __init__(self, scale: float = 1.0, parent=None):
+        super().__init__(parent)
+        self.scale = scale
+        self._busy_poll = False
+        self.setObjectName("LiveSystemLoadsView")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
+
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        card = QtWidgets.QFrame()
+        card.setObjectName("DialogCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        outer.addWidget(card)
+
+        root = QtWidgets.QVBoxLayout(card)
+        m = _s(12, scale)
+        root.setContentsMargins(m, _s(10, scale), m, _s(10, scale))
+        root.setSpacing(_s(8, scale))
+
+        # --- Top Header ---
+        hdr = QtWidgets.QHBoxLayout()
+        hdr.setSpacing(_s(10, scale))
+
+        ico_lbl = QtWidgets.QLabel()
+        ico_lbl.setPixmap(icons.pixmap("firmware", _s(32, scale)))
+        ico_lbl.setFixedSize(_s(36, scale), _s(36, scale))
+        hdr.addWidget(ico_lbl)
+
+        title_col = QtWidgets.QVBoxLayout()
+        title_col.setSpacing(1)
+        t_lbl = QtWidgets.QLabel("System Loads & Firmware Telemetry")
+        t_lbl.setObjectName("DialogTitle")
+        title_col.addWidget(t_lbl)
+
+        self.sub_lbl = QtWidgets.QLabel("Live Host CPU, RAM, Storage & Microcontroller (MCU) Loads")
+        self.sub_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(10, scale)}px; font-weight: 600;")
+        title_col.addWidget(self.sub_lbl)
+        hdr.addLayout(title_col, 1)
+
+        self.live_badge = QtWidgets.QLabel("● LIVE SYSTEM LOADS")
+        self.live_badge.setStyleSheet(f"""
+            color: #34D399;
+            background: rgba(16, 185, 129, 0.16);
+            border: 1px solid #10B981;
+            border-radius: {_s(6, scale)}px;
+            font-size: {_s(10, scale)}px;
+            font-weight: 800;
+            padding: {_s(3, scale)}px {_s(8, scale)}px;
+        """)
+        hdr.addWidget(self.live_badge)
+
+        close_x = QtWidgets.QPushButton("\u2715")
+        close_x.setObjectName("DialogCloseX")
+        close_x.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_x.clicked.connect(self._on_close)
+        hdr.addWidget(close_x)
+        root.addLayout(hdr)
+
+        # --- Main Two-Column Body ---
+        body = QtWidgets.QHBoxLayout()
+        body.setSpacing(_s(10, scale))
+
+        # =====================================================================
+        # LEFT COLUMN: Host (Raspberry Pi / Linux) Live System Loads
+        # =====================================================================
+        host_box = QtWidgets.QFrame()
+        host_box.setObjectName("DialogStepsBox")
+        host_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        h_lay = QtWidgets.QVBoxLayout(host_box)
+        h_lay.setContentsMargins(_s(10, scale), _s(8, scale), _s(10, scale), _s(8, scale))
+        h_lay.setSpacing(_s(6, scale))
+
+        self.host_hdr_lbl = QtWidgets.QLabel("HOST SYSTEM (RASPBERRY PI)")
+        self.host_hdr_lbl.setStyleSheet(f"color: #00E5FF; font-size: {_s(11, scale)}px; font-weight: 900; letter-spacing: 0.6px;")
+        h_lay.addWidget(self.host_hdr_lbl)
+
+        self.distro_lbl = QtWidgets.QLabel("OS: Linux • Connecting...")
+        self.distro_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(10, scale)}px; font-weight: 600;")
+        h_lay.addWidget(self.distro_lbl)
+
+        self.cpu_bar, self.cpu_val_lbl = self._make_metric_row(h_lay, "CPU Load", "0.0% (Load: 0.00)", "#00E5FF")
+        self.temp_bar, self.temp_val_lbl = self._make_metric_row(h_lay, "CPU Temp", "0.0°C", "#34D399")
+        self.mem_bar, self.mem_val_lbl = self._make_metric_row(h_lay, "Memory", "0 / 0 MB (0%)", "#38BDF8")
+        self.disk_bar, self.disk_val_lbl = self._make_metric_row(h_lay, "SD Storage", "0.0 / 0.0 GB (0%)", "#A78BFA")
+
+        h_lay.addStretch(1)
+
+        # Software versions box
+        sw_card = QtWidgets.QFrame()
+        sw_card.setStyleSheet(f"""
+            QFrame {{
+                background: rgba(15, 23, 42, 0.75);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: {_s(6, scale)}px;
+            }}
+        """)
+        sw_lay = QtWidgets.QVBoxLayout(sw_card)
+        sw_lay.setContentsMargins(_s(8, scale), _s(5, scale), _s(8, scale), _s(5, scale))
+        sw_lay.setSpacing(2)
+
+        self.sw_klipper_lbl = QtWidgets.QLabel("Klipper: --  •  Moonraker: --")
+        self.sw_klipper_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(10, scale)}px; font-weight: 700; border: none; background: transparent;")
+        sw_lay.addWidget(self.sw_klipper_lbl)
+
+        self.sw_mr_stats_lbl = QtWidgets.QLabel("Moonraker Load: --  •  Uptime: --")
+        self.sw_mr_stats_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(10, scale)}px; font-weight: 600; border: none; background: transparent;")
+        sw_lay.addWidget(self.sw_mr_stats_lbl)
+
+        h_lay.addWidget(sw_card)
+        body.addWidget(host_box, 11)
+
+        # =====================================================================
+        # RIGHT COLUMN: Live Microcontroller (MCU) Loads
+        # =====================================================================
+        mcu_box = QtWidgets.QFrame()
+        mcu_box.setObjectName("DialogStepsBox")
+        mcu_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.mcu_lay = QtWidgets.QVBoxLayout(mcu_box)
+        self.mcu_lay.setContentsMargins(_s(10, scale), _s(8, scale), _s(10, scale), _s(8, scale))
+        self.mcu_lay.setSpacing(_s(6, scale))
+
+        mcu_hdr = QtWidgets.QLabel("MICROCONTROLLER (MCU) LOADS")
+        mcu_hdr.setStyleSheet(f"color: #00E5FF; font-size: {_s(11, scale)}px; font-weight: 900; letter-spacing: 0.6px;")
+        self.mcu_lay.addWidget(mcu_hdr)
+
+        self.mcu_cards_container = QtWidgets.QVBoxLayout()
+        self.mcu_cards_container.setSpacing(_s(6, scale))
+        self.mcu_lay.addLayout(self.mcu_cards_container)
+        self.mcu_lay.addStretch(1)
+
+        self.mcu_widgets = {}
+        body.addWidget(mcu_box, 12)
+
+        root.addLayout(body, 1)
+
+        # --- Bottom Row ---
+        bot = QtWidgets.QHBoxLayout()
+        bot.addStretch(1)
+        back_btn = QtWidgets.QPushButton("\u2039  Back to Settings")
+        back_btn.setObjectName("DialogStartBtn")
+        back_btn.setStyleSheet(f"font-size: {_s(12, scale)}px; font-weight: 800; padding: {_s(6, scale)}px {_s(18, scale)}px;")
+        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.clicked.connect(self._on_close)
+        bot.addWidget(back_btn)
+        root.addLayout(bot)
+
+        self._poll_timer = QtCore.QTimer(self)
+        self._poll_timer.setInterval(1000)
+        self._poll_timer.timeout.connect(self._poll_loads)
+        QtCore.QTimer.singleShot(80, self._start_polling)
+
+    def _make_metric_row(self, parent_lay, label_txt: str, init_val: str, color: str):
+        s = self.scale
+        wrap = QtWidgets.QVBoxLayout()
+        wrap.setSpacing(2)
+
+        top = QtWidgets.QHBoxLayout()
+        lbl = QtWidgets.QLabel(label_txt)
+        lbl.setStyleSheet(f"color: #E2E8F0; font-size: {_s(11, s)}px; font-weight: 800;")
+        val = QtWidgets.QLabel(init_val)
+        val.setStyleSheet(f"color: {color}; font-size: {_s(11, s)}px; font-weight: 800;")
+        top.addWidget(lbl)
+        top.addStretch(1)
+        top.addWidget(val)
+        wrap.addLayout(top)
+
+        bar = QtWidgets.QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(_s(7, s))
+        bar.setStyleSheet(f"""
+            QProgressBar {{
+                background: rgba(15, 23, 42, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: {_s(3, s)}px;
+            }}
+            QProgressBar::chunk {{
+                background: {color};
+                border-radius: {_s(2, s)}px;
+            }}
+        """)
+        wrap.addWidget(bar)
+        parent_lay.addLayout(wrap)
+        return bar, val
+
+    def _create_mcu_card(self, key: str):
+        s = self.scale
+        card = QtWidgets.QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                background: rgba(15, 23, 42, 0.78);
+                border: 1px solid rgba(0, 229, 255, 0.22);
+                border-radius: {_s(8, s)}px;
+            }}
+        """)
+        lay = QtWidgets.QVBoxLayout(card)
+        lay.setContentsMargins(_s(9, s), _s(6, s), _s(9, s), _s(6, s))
+        lay.setSpacing(_s(4, s))
+
+        top = QtWidgets.QHBoxLayout()
+        title_lbl = QtWidgets.QLabel(key.upper())
+        title_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(11, s)}px; font-weight: 900; border: none; background: transparent;")
+        chip_badge = QtWidgets.QLabel("MCU")
+        chip_badge.setStyleSheet(f"""
+            color: #00E5FF;
+            background: rgba(0, 229, 255, 0.14);
+            border: 1px solid rgba(0, 229, 255, 0.4);
+            border-radius: {_s(4, s)}px;
+            font-size: {_s(9, s)}px;
+            font-weight: 800;
+            padding: 1px {_s(6, s)}px;
+        """)
+        top.addWidget(title_lbl)
+        top.addStretch(1)
+        top.addWidget(chip_badge)
+        lay.addLayout(top)
+
+        bar = QtWidgets.QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(_s(6, s))
+        bar.setStyleSheet(f"""
+            QProgressBar {{
+                background: rgba(2, 6, 23, 0.9);
+                border: none;
+                border-radius: {_s(3, s)}px;
+            }}
+            QProgressBar::chunk {{
+                background: #34D399;
+                border-radius: {_s(3, s)}px;
+            }}
+        """)
+        lay.addWidget(bar)
+
+        metrics_lbl = QtWidgets.QLabel("Load: 0.0%  •  Awake: 0.0%  •  Freq: -- MHz")
+        metrics_lbl.setStyleSheet(f"color: #E2E8F0; font-size: {_s(10, s)}px; font-weight: 700; border: none; background: transparent;")
+        lay.addWidget(metrics_lbl)
+
+        ver_lbl = QtWidgets.QLabel("Version: --  •  TX/RX: --")
+        ver_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(9, s)}px; font-weight: 600; border: none; background: transparent;")
+        lay.addWidget(ver_lbl)
+
+        self.mcu_cards_container.addWidget(card)
+        w_dict = {
+            "card": card,
+            "title": title_lbl,
+            "badge": chip_badge,
+            "bar": bar,
+            "metrics": metrics_lbl,
+            "ver": ver_lbl,
+        }
+        self.mcu_widgets[key] = w_dict
+        return w_dict
+
+    def _start_polling(self):
+        self._poll_timer.start()
+        self._poll_loads()
+
+    def _poll_loads(self):
+        if self._busy_poll:
+            return
+        main_win = self.window()
+        mr = getattr(main_win, "moonraker", None)
+        if not mr:
+            return
+        self._busy_poll = True
+
+        def _done(data: dict):
+            self._busy_poll = False
+            self._update_telemetry(data)
+
+        mr.query_system_loads(on_done=_done)
+
+    @staticmethod
+    def _fmt_bytes(b: int) -> str:
+        if b < 1024:
+            return f"{b} B"
+        if b < 1024 * 1024:
+            return f"{b / 1024:.1f} KB"
+        return f"{b / (1024 * 1024):.1f} MB"
+
+    @staticmethod
+    def _fmt_uptime(sec: float) -> str:
+        if sec <= 0:
+            return "--"
+        m, _ = divmod(int(sec), 60)
+        h, m = divmod(m, 60)
+        d, h = divmod(h, 24)
+        if d > 0:
+            return f"{d}d {h}h {m}m"
+        if h > 0:
+            return f"{h}h {m}m"
+        return f"{m}m"
+
+    def _update_telemetry(self, d: dict):
+        model = d.get("host_model") or "Raspberry Pi Host"
+        distro = d.get("distro") or "Linux"
+        kernel = d.get("kernel") or ""
+        cores = int(d.get("cpu_count") or 4)
+        self.host_hdr_lbl.setText(f"HOST ({model.upper()[:28]})")
+        self.distro_lbl.setText(f"{distro}  •  Kernel {kernel}" if kernel else distro)
+
+        cpu_pct = float(d.get("cpu_usage_pct") or 0.0)
+        sysload = float(d.get("sysload") or 0.0)
+        self.cpu_bar.setValue(min(100, max(1, round(cpu_pct))))
+        self.cpu_val_lbl.setText(f"{cpu_pct:.1f}%  (SysLoad: {sysload:.2f} / {cores}c)")
+
+        c_temp = float(d.get("cpu_temp") or 0.0)
+        self.temp_bar.setValue(min(100, max(1, round(c_temp))))
+        self.temp_val_lbl.setText(f"{c_temp:.1f}°C")
+
+        mem_u = float(d.get("mem_used_mb") or 0.0)
+        mem_t = float(d.get("mem_total_mb") or 0.0)
+        mem_p = float(d.get("mem_pct") or 0.0)
+        self.mem_bar.setValue(min(100, max(1, round(mem_p))))
+        self.mem_val_lbl.setText(f"{mem_u:.0f} / {mem_t:.0f} MB ({mem_p:.1f}%)")
+
+        d_u = float(d.get("disk_used_gb") or 0.0)
+        d_t = float(d.get("disk_total_gb") or 0.0)
+        d_p = float(d.get("disk_pct") or 0.0)
+        self.disk_bar.setValue(min(100, max(1, round(d_p))))
+        self.disk_val_lbl.setText(f"{d_u:.1f} / {d_t:.1f} GB ({d_p:.1f}%)")
+
+        k_ver = str(d.get("klipper_version") or "v0.13.0")
+        short_k = "-".join(k_ver.split("-")[:2]) if "-" in k_ver else k_ver
+        m_ver = str(d.get("moonraker_version") or "v0.10.0")
+        short_m = "-".join(m_ver.split("-")[:2]) if "-" in m_ver else m_ver
+        self.sw_klipper_lbl.setText(f"Klipper: {short_k}   •   Moonraker: {short_m}")
+
+        mr_cpu = float(d.get("moonraker_cpu_pct") or 0.0)
+        mr_mem = float(d.get("moonraker_mem_mb") or 0.0)
+        up_str = self._fmt_uptime(float(d.get("uptime_sec") or 0.0))
+        ws_c = int(d.get("ws_connections") or 0)
+        self.sw_mr_stats_lbl.setText(f"Moonraker: {mr_cpu:.1f}% CPU, {mr_mem:.0f} MB  •  Clients: {ws_c}  •  Up: {up_str}")
+
+        # Update MCU cards
+        mcus = d.get("mcus") or []
+        for m in mcus:
+            key = m.get("key", "mcu")
+            w = self.mcu_widgets.get(key)
+            if not w:
+                w = self._create_mcu_card(key)
+            w["title"].setText(m.get("title", key))
+            w["badge"].setText(f"{m.get('chip', 'MCU')} • {m.get('freq_mhz', 0.0):.0f} MHz")
+            load_p = float(m.get("load_pct") or 0.0)
+            awake_p = float(m.get("awake_pct") or 0.0)
+            w["bar"].setValue(min(100, max(2, round(max(load_p, awake_p)))))
+            w["metrics"].setText(
+                f"Load: {load_p:.1f}%   •   Awake: {awake_p:.1f}%   •   Clock: {m.get('freq_mhz', 0.0):.2f} MHz"
+            )
+            tx = self._fmt_bytes(int(m.get("bytes_write") or 0))
+            rx = self._fmt_bytes(int(m.get("bytes_read") or 0))
+            retx = int(m.get("bytes_retransmit") or 0)
+            w["ver"].setText(
+                f"FW: {m.get('version', '--')}   •   TX: {tx} / RX: {rx}   •   Retransmits: {retx}"
+            )
+
+    def _on_close(self):
+        self._poll_timer.stop()
+        self.closed.emit()
+
+    def hideEvent(self, event):
+        self._poll_timer.stop()
+        super().hideEvent(event)
+
+
 class SettingsPage(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -413,43 +787,9 @@ class SettingsPage(QtWidgets.QWidget):
 
     def _on_firmware_info(self, tile):
         main_win = self.window()
-        mr = getattr(main_win, "moonraker", None)
-        fw = getattr(mr, "firmware_info", {}) if mr else {}
-        klipper_ver = fw.get("klipper_version", "v0.13.0")
-        mcu_chip = fw.get("mcu_chip", "stm32f072xb")
-        mcu_freq = fw.get("mcu_freq", "48 MHz")
-        mcu_ver = fw.get("mcu_version", klipper_ver)
-        mcu_comp = fw.get("mcu_compiler", "gcc: 14.2.1 | binutils: 2.44")
-        mr_ver = fw.get("moonraker_version", "v0.10.0")
-        mr_api = fw.get("moonraker_api", "API 1.5.0")
-        host_name = fw.get("hostname", "pi4")
-        cfg_path = fw.get("config_file", "/home/pi/printer_data/config/printer.cfg")
-        py_path = fw.get("python_path", "/home/pi/klippy-env")
-        state = fw.get("state", "ready")
-
-        badge_txt = f"{klipper_ver.split('-')[0]}  \u2022  LIVE" if (mr and mr.connected) else f"{klipper_ver.split('-')[0]}"
-
-        view = SettingsInfoView(
-            icon_name="firmware",
-            title="Installed Firmware & System Info",
-            subtitle="Klipper Core, Microcontroller & Host Software",
-            badge=badge_txt,
-            items=[
-                ("Klipper Firmware", str(klipper_ver)),
-                ("MCU Microcontroller", f"{mcu_chip} ({mcu_freq})"),
-                ("MCU Firmware Build", str(mcu_ver)),
-                ("MCU Toolchain", str(mcu_comp)),
-                ("Moonraker Service", f"{mr_ver} ({mr_api})"),
-                ("Host Machine", f"{host_name} (4 cores) \u2022 Linux"),
-                ("Python Environment", str(py_path)),
-                ("Active Config File", str(cfg_path)),
-                ("Klippy Engine State", f"{state.upper()} \u2022 Verified")
-            ],
-            scale=self._scale,
-            parent=self
-        )
+        view = LiveSystemLoadsView(scale=self._scale, parent=main_win)
         if hasattr(main_win, "open_sub_screen"):
-            main_win.open_sub_screen(view, title="Firmware Info", return_page="settings")
+            main_win.open_sub_screen(view, title="System Loads & Firmware", return_page="settings")
         else:
             view.show()
 

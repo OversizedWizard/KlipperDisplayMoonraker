@@ -854,8 +854,8 @@ class MoonrakerClient(QtCore.QObject):
                 "steppers_enabled": {},
             }
             try:
-                #Configured trigger_force from printer.cfg if available
-                lcp_cfg = (self.config_settings or {}).get("load_cell_probe", {})
+                # Configured trigger_force from printer.cfg if available
+                lcp_cfg = (getattr(self, "config", None) or {}).get("load_cell_probe", {})
                 if isinstance(lcp_cfg, dict) and lcp_cfg.get("trigger_force") is not None:
                     res["trigger_force"] = float(lcp_cfg.get("trigger_force", 60.0))
 
@@ -899,4 +899,140 @@ class MoonrakerClient(QtCore.QObject):
                 self._dispatch_signal.emit(lambda: on_done(res))
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def query_system_loads(self, on_done=None):
+        """Fetch live Host CPU/RAM/Temp/Disk & all MCU loads/frequencies/versions (Mainsail System Loads style)."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _run():
+            res = {
+                "host_model": getattr(self, "_cached_host_model", ""),
+                "distro": getattr(self, "_cached_distro", ""),
+                "kernel": getattr(self, "_cached_kernel", ""),
+                "cpu_count": getattr(self, "_cached_cpu_count", 4),
+                "cpu_usage_pct": 0.0,
+                "cpu_temp": 0.0,
+                "sysload": 0.0,
+                "mem_used_mb": 0.0,
+                "mem_total_mb": 0.0,
+                "mem_pct": 0.0,
+                "disk_used_gb": getattr(self, "_cached_disk_used_gb", 0.0),
+                "disk_total_gb": getattr(self, "_cached_disk_total_gb", 0.0),
+                "disk_pct": getattr(self, "_cached_disk_pct", 0.0),
+                "uptime_sec": 0.0,
+                "moonraker_cpu_pct": 0.0,
+                "moonraker_mem_mb": 0.0,
+                "ws_connections": 0,
+                "mcus": [],
+                "klipper_version": self.firmware_info.get("klipper_version", "v0.13.0"),
+                "moonraker_version": self.firmware_info.get("moonraker_version", "v0.10.0"),
+                "klippy_state": self.klippy_state,
+            }
+            try:
+                # 1. Cache static system_info & disk_usage if not yet fetched
+                if not res["host_model"]:
+                    si = self._fetch_json(host, "/machine/system_info", timeout=2.0)
+                    if si and "result" in si:
+                        sinfo = si["result"].get("system_info", {})
+                        cinfo = sinfo.get("cpu_info", {})
+                        dinfo = sinfo.get("distribution", {})
+                        self._cached_host_model = cinfo.get("model") or cinfo.get("cpu_desc") or "Raspberry Pi"
+                        self._cached_cpu_count = int(cinfo.get("cpu_count") or 4)
+                        self._cached_distro = dinfo.get("name") or "Linux"
+                        self._cached_kernel = dinfo.get("kernel_version") or ""
+                        res["host_model"] = self._cached_host_model
+                        res["cpu_count"] = self._cached_cpu_count
+                        res["distro"] = self._cached_distro
+                        res["kernel"] = self._cached_kernel
+
+                if res["disk_total_gb"] <= 0:
+                    df = self._fetch_json(host, "/server/files/directory?path=gcodes", timeout=2.0)
+                    if df and "result" in df:
+                        du = df["result"].get("disk_usage", {})
+                        tot_b = float(du.get("total", 0) or 0)
+                        used_b = float(du.get("used", 0) or 0)
+                        if tot_b > 0:
+                            self._cached_disk_total_gb = tot_b / (1024 ** 3)
+                            self._cached_disk_used_gb = used_b / (1024 ** 3)
+                            self._cached_disk_pct = (used_b / tot_b) * 100.0
+                            res["disk_total_gb"] = self._cached_disk_total_gb
+                            res["disk_used_gb"] = self._cached_disk_used_gb
+                            res["disk_pct"] = self._cached_disk_pct
+
+                # 2. Live /machine/proc_stats
+                ps = self._fetch_json(host, "/machine/proc_stats", timeout=2.0)
+                if ps and "result" in ps:
+                    p = ps["result"]
+                    res["cpu_temp"] = float(p.get("cpu_temp") or 0.0)
+                    cpu_u = p.get("system_cpu_usage") or {}
+                    res["cpu_usage_pct"] = float(cpu_u.get("cpu") or 0.0)
+                    mem = p.get("system_memory") or {}
+                    tot_kb = float(mem.get("total") or 0.0)
+                    used_kb = float(mem.get("used") or 0.0)
+                    if tot_kb > 0:
+                        res["mem_total_mb"] = tot_kb / 1024.0
+                        res["mem_used_mb"] = used_kb / 1024.0
+                        res["mem_pct"] = (used_kb / tot_kb) * 100.0
+                    res["uptime_sec"] = float(p.get("system_uptime") or 0.0)
+                    res["ws_connections"] = int(p.get("websocket_connections") or 0)
+                    m_stats = p.get("moonraker_stats") or []
+                    if m_stats:
+                        last_m = m_stats[-1]
+                        res["moonraker_cpu_pct"] = float(last_m.get("cpu_usage") or 0.0)
+                        res["moonraker_mem_mb"] = float(last_m.get("memory") or 0.0) / 1024.0
+
+                # 3. Live MCU objects + system_stats
+                objs_list = getattr(self, "objects", None) or []
+                mcu_keys = [o for o in objs_list if o == "mcu" or o.startswith("mcu ")]
+                if not mcu_keys:
+                    mcu_keys = ["mcu", "mcu toolhead"]
+                q_parts = [urllib.parse.quote(k) for k in mcu_keys] + ["system_stats"]
+                q_url = "/printer/objects/query?" + "&".join(q_parts)
+                od = self._fetch_json(host, q_url, timeout=2.0)
+                if od and "result" in od:
+                    st = od["result"].get("status", {})
+                    sys_st = st.get("system_stats") or {}
+                    res["sysload"] = float(sys_st.get("sysload") or 0.0)
+
+                    for mk in mcu_keys:
+                        m_obj = st.get(mk)
+                        if not isinstance(m_obj, dict) or not m_obj:
+                            continue
+                        consts = m_obj.get("mcu_constants") or {}
+                        lstats = m_obj.get("last_stats") or {}
+                        chip = consts.get("MCU", "MCU")
+                        nom_freq = float(consts.get("CLOCK_FREQ") or lstats.get("freq") or 0.0)
+                        live_freq = float(lstats.get("freq") or nom_freq)
+                        awake_s = float(lstats.get("mcu_awake") or 0.0)
+                        task_avg = float(lstats.get("mcu_task_avg") or 0.0)
+                        task_std = float(lstats.get("mcu_task_stddev") or 0.0)
+
+                        awake_pct = min(100.0, (awake_s / 5.0) * 100.0)
+                        load_pct = min(100.0, ((task_avg + 3.0 * task_std) / 0.0025) * 100.0)
+
+                        ver = str(m_obj.get("mcu_version") or res["klipper_version"])
+                        short_ver = "-".join(ver.split("-")[:2]) if "-" in ver else ver
+
+                        res["mcus"].append({
+                            "key": mk,
+                            "title": "Primary MCU (mcu)" if mk == "mcu" else f"MCU ({mk.replace('mcu ', '')})",
+                            "chip": chip,
+                            "version": short_ver,
+                            "full_version": ver,
+                            "freq_mhz": live_freq / 1e6 if live_freq > 0 else 0.0,
+                            "load_pct": load_pct,
+                            "awake_pct": awake_pct,
+                            "bytes_write": int(lstats.get("bytes_write") or 0),
+                            "bytes_read": int(lstats.get("bytes_read") or 0),
+                            "bytes_retransmit": int(lstats.get("bytes_retransmit") or 0),
+                            "srtt_ms": float(lstats.get("srtt") or 0.0) * 1000.0,
+                        })
+            except Exception:
+                pass
+
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(res))
+
+        threading.Thread(target=_run, daemon=True).start()
+
 

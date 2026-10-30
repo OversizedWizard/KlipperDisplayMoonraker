@@ -380,7 +380,7 @@ class PrinterTestsScreen(QtWidgets.QFrame):
         mr = self._get_moonraker()
         if mr:
             # Check if stepper_z1 exists in config
-            cfg = getattr(mr, "config_settings", {}) or {}
+            cfg = getattr(mr, "config", None) or {}
             if cfg and "stepper_z1" not in cfg and "stepper_z1" in self.motor_btns:
                 self.motor_btns["stepper_z1"].setEnabled(False)
                 self.motor_btns["stepper_z1"].setText("⇵  Z1 (N/A)")
