@@ -31,6 +31,8 @@ class MoonrakerClient(QtCore.QObject):
     config_loaded = Signal(dict, list)
     # (firmware_info: dict) - emitted when firmware, MCU, and Moonraker versions are loaded
     firmware_info_updated = Signal(dict)
+    # (print_stats: dict) - live printing state, progress, durations, layers, and factors
+    print_stats_updated = Signal(dict)
     # Internal cross-thread dispatcher to execute callbacks safely on Qt GUI thread
     _dispatch_signal = Signal(object)
 
@@ -58,6 +60,7 @@ class MoonrakerClient(QtCore.QObject):
             "python_path": "/home/pi/klippy-env",
             "state": "ready"
         }
+        self.last_print_stats: dict = {}
         self._busy = False
         self._dispatch_signal.connect(lambda fn: fn())
 
@@ -100,7 +103,7 @@ class MoonrakerClient(QtCore.QObject):
                 if h not in candidates:
                     candidates.append(h)
 
-            query_path = "/printer/objects/query?extruder&heater_bed&webhooks&toolhead&gcode_move&load_cell_probe&load_cell&probe"
+            query_path = "/printer/objects/query?extruder&heater_bed&webhooks&toolhead&gcode_move&load_cell_probe&load_cell&probe&print_stats&virtual_sdcard&display_status&fan"
             for host in candidates:
                 try:
                     data = self._fetch_json(host, query_path, timeout=1.2)
@@ -148,6 +151,53 @@ class MoonrakerClient(QtCore.QObject):
                         self.connection_changed.emit(True, host, k_state)
                         self.temps_updated.emit(n_cur, n_tgt, b_cur, b_tgt)
                         self.coords_updated.emit(x_pos, y_pos, z_pos, homed)
+
+                        # Print stats & virtual sdcard parsing
+                        p_stats = status.get("print_stats", {})
+                        v_sd = status.get("virtual_sdcard", {})
+                        d_status = status.get("display_status", {})
+                        fan_obj = status.get("fan", {})
+
+                        progress = float(d_status.get("progress") or v_sd.get("progress") or 0.0)
+                        p_state = str(p_stats.get("state", "standby")).lower()
+                        filename = str(p_stats.get("filename", ""))
+                        print_dur = float(p_stats.get("print_duration", 0.0))
+                        total_dur = float(p_stats.get("total_duration", 0.0))
+                        filament = float(p_stats.get("filament_used", 0.0))
+
+                        info = p_stats.get("info") or {}
+                        cur_layer = info.get("current_layer")
+                        tot_layer = info.get("total_layer")
+
+                        spd_fac = float(gcode_move.get("speed_factor", 1.0))
+                        ext_fac = float(gcode_move.get("extrude_factor", 1.0))
+                        fan_spd = float(fan_obj.get("speed", 0.0))
+
+                        homing_origin = gcode_move.get("homing_origin", [0.0, 0.0, 0.0, 0.0])
+                        z_offset = float(homing_origin[2]) if len(homing_origin) > 2 else 0.0
+
+                        stats_dict = {
+                            "state": p_state,
+                            "filename": filename,
+                            "progress": progress,
+                            "print_duration": print_dur,
+                            "total_duration": total_dur,
+                            "filament_used": filament,
+                            "current_layer": cur_layer,
+                            "total_layer": tot_layer,
+                            "speed_factor": spd_fac,
+                            "extrude_factor": ext_fac,
+                            "fan_speed": fan_spd,
+                            "z_offset": z_offset,
+                            "nozzle_cur": n_cur,
+                            "nozzle_tgt": n_tgt,
+                            "bed_cur": b_cur,
+                            "bed_tgt": b_tgt,
+                            "z_pos": z_pos,
+                            "message": str(p_stats.get("message") or d_status.get("message") or "")
+                        }
+                        self.last_print_stats = stats_dict
+                        self.print_stats_updated.emit(stats_dict)
                         if force_val is not None:
                             self.load_cell_updated.emit(force_val)
                         return
@@ -385,3 +435,82 @@ class MoonrakerClient(QtCore.QObject):
         """Run bed mesh calibration."""
         self.send_gcode(f"BED_MESH_CALIBRATE PROFILE={profile}", on_done=on_done, timeout=240.0)
 
+
+    def list_files(self, directory: str = "gcodes", on_done=None):
+        """Fetch list of files and subdirectories from Moonraker."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+        def _run():
+            res = {"files": [], "dirs": [], "disk_usage": {}}
+            try:
+                enc_path = urllib.parse.quote(directory)
+                url = f"http://{host}/server/files/directory?path={enc_path}"
+                with urllib.request.urlopen(url, timeout=3.5) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        res = data.get("result", res)
+            except Exception:
+                pass
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(res))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def get_file_metadata(self, filename: str, on_done=None):
+        """Fetch slicer metadata and thumbnails for a gcode file."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+        def _run():
+            res = {}
+            try:
+                enc_fn = urllib.parse.quote(filename)
+                url = f"http://{host}/server/files/metadata?filename={enc_fn}"
+                with urllib.request.urlopen(url, timeout=3.5) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        res = data.get("result", {})
+            except Exception:
+                pass
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(res))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def start_print(self, filename: str, on_done=None):
+        """Start printing a gcode file via Moonraker."""
+        enc_fn = urllib.parse.quote(filename)
+        self.post_endpoint(f"/printer/print/start?filename={enc_fn}", on_done=on_done, timeout=10.0)
+
+    def pause_print(self, on_done=None):
+        """Pause active print."""
+        self.post_endpoint("/printer/print/pause", on_done=on_done, timeout=10.0)
+
+    def resume_print(self, on_done=None):
+        """Resume paused print."""
+        self.post_endpoint("/printer/print/resume", on_done=on_done, timeout=10.0)
+
+    def cancel_print(self, on_done=None):
+        """Cancel active print."""
+        self.post_endpoint("/printer/print/cancel", on_done=on_done, timeout=10.0)
+
+    def set_speed_factor(self, percent: int, on_done=None):
+        """Set speed factor feedrate override (e.g. 100)."""
+        self.send_gcode(f"M220 S{int(percent)}", on_done=on_done)
+
+    def set_flow_factor(self, percent: int, on_done=None):
+        """Set extrusion flow rate override (e.g. 100)."""
+        self.send_gcode(f"M221 S{int(percent)}", on_done=on_done)
+
+    def set_fan_speed(self, percent: int, on_done=None):
+        """Set part cooling fan speed (0 to 100%)."""
+        pwm = max(0, min(255, round(percent * 2.55)))
+        self.send_gcode(f"M106 S{pwm}", on_done=on_done)
+
+    def adjust_z_offset(self, delta: float, on_done=None):
+        """Babystep live Z offset by delta mm."""
+        self.send_gcode(f"SET_GCODE_OFFSET Z_ADJUST={delta:+.4f} MOVE=1 MOVE_SPEED=5", on_done=on_done)
+
+    def save_z_offset(self, on_done=None):
+        """Apply babystepped Z offset and persist to printer.cfg via SAVE_CONFIG."""
+        has_probe = any(k in self.objects for k in ["probe", "bltouch", "load_cell_probe", "smart_effector"])
+        if has_probe:
+            cmd = "Z_OFFSET_APPLY_PROBE\\nSAVE_CONFIG"
+        else:
+            cmd = "Z_OFFSET_APPLY_ENDSTOP\\nSAVE_CONFIG"
+        self.send_gcode(cmd, on_done=on_done, timeout=20.0)

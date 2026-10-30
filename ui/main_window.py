@@ -5,6 +5,8 @@ from datetime import datetime
 
 from . import icons
 from .home_page import HomePage
+from .files_page import FilesPage
+from .printing_page import PrintingPage
 from .calibrate_page import CalibratePage
 from .power_page import PowerPage
 from .spool_page import SpoolPage
@@ -16,6 +18,7 @@ from .theme import BASE_W, BASE_H, build_stylesheet
 # key, sidebar label, page title, page description
 NAV_ITEMS = [
     ("home", "Home", "Home", "Printer dashboard - temperatures, job progress and quick controls."),
+    ("files", "Print", "Print Files", "Browse local gcode files and start 3D prints."),
     ("spool", "Spool", "Spool", "Filament load / unload and spool management."),
     ("settings", "Settings", "Settings", "Printer, network, display and system configuration."),
     ("calibrate", "Calibrate", "Calibration", "Klipper hardware calibration and machine tuning."),
@@ -65,7 +68,16 @@ class Sidebar(QtWidgets.QFrame):
             self.buttons[key] = btn
 
     def set_active(self, key: str):
-        self.buttons[key].setChecked(True)
+        if key in self.buttons:
+            self.buttons[key].setChecked(True)
+
+    def set_print_state(self, state: str):
+        if "files" in self.buttons:
+            btn = self.buttons["files"]
+            if state in ("printing", "paused"):
+                btn.setText("Printing")
+            else:
+                btn.setText("Print")
 
     def apply_scale(self, s: float):
         self.setFixedWidth(_s(86, s))
@@ -263,6 +275,8 @@ class MainWindow(QtWidgets.QWidget):
         for key, _label, title, desc in NAV_ITEMS:
             if key == "home":
                 page = HomePage()
+            elif key == "files":
+                page = FilesPage()
             elif key == "spool":
                 page = SpoolPage()
             elif key == "calibrate":
@@ -275,6 +289,11 @@ class MainWindow(QtWidgets.QWidget):
                 page = PlaceholderPage(key, title, desc)
             self.stack.addWidget(page)
             self.pages[key] = page
+
+        # Dedicated live printing page
+        self.printing_page = PrintingPage()
+        self.stack.addWidget(self.printing_page)
+        self.pages["printing"] = self.printing_page
 
         # Embedded in-window screen container for full-page procedures & settings
         self.sub_screen_page = QtWidgets.QWidget()
@@ -303,6 +322,7 @@ class MainWindow(QtWidgets.QWidget):
         self.moonraker.temps_updated.connect(self.pages["home"].update_temps)
         self.moonraker.coords_updated.connect(self.pages["home"].update_coords)
         self.moonraker.load_cell_updated.connect(self.topbar.set_probe_force)
+        self.moonraker.print_stats_updated.connect(self._on_print_stats_updated)
 
         # Debounce re-scaling while the window is being resized.
         self._resize_timer = QtCore.QTimer(self)
@@ -315,6 +335,16 @@ class MainWindow(QtWidgets.QWidget):
         for page in self.pages.values():
             page.moonraker = self.moonraker
         self.moonraker.start()
+
+    def _on_print_stats_updated(self, st: dict):
+        if "printing" in self.pages:
+            self.pages["printing"].update_print_stats(st)
+        state = st.get("state", "standby")
+        if hasattr(self.sidebar, "set_print_state"):
+            self.sidebar.set_print_state(state)
+        # If print started while on files page, switch to printing screen
+        if state == "printing" and getattr(self, "_current_page", "") == "files":
+            self.show_page("printing")
 
     def _on_connection_changed(self, connected: bool, host: str, klippy_state: str):
         self.topbar.set_connection(connected, host, klippy_state)
@@ -374,11 +404,23 @@ class MainWindow(QtWidgets.QWidget):
     def show_page(self, key: str):
         if hasattr(self, "_active_sub_widget") and self._active_sub_widget:
             self._clear_sub_screen()
+        # If user taps Print in sidebar while actively printing, show the live print page
+        if key == "files":
+            mr = getattr(self, "moonraker", None)
+            if mr and hasattr(mr, "last_print_stats") and mr.last_print_stats:
+                st = mr.last_print_stats.get("state", "standby")
+                if st in ("printing", "paused"):
+                    key = "printing"
         self._current_page = key
         self.stack.setCurrentWidget(self.pages[key])
-        self.sidebar.set_active(key)
-        title = next(t for k, _l, t, _d in NAV_ITEMS if k == key)
-        self.topbar.set_title(title)
+        sidebar_key = "files" if key == "printing" else key
+        if sidebar_key in self.sidebar.buttons:
+            self.sidebar.set_active(sidebar_key)
+        if key == "printing":
+            self.topbar.set_title("Active Print")
+        else:
+            title = next((t for k, _l, t, _d in NAV_ITEMS if k == key), "Klipper")
+            self.topbar.set_title(title)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

@@ -445,6 +445,122 @@ _SVG.update({
     <line x1="50" y1="42" x2="57" y2="42"/>
   </g>
 </svg>""",
+
+    "files": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="flg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="cube" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00E5FF"/><stop offset="1" stop-color="#0284C7"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="8" width="40" height="48" rx="6" fill="#1E293B" stroke="url(#flg)" stroke-width="3"/>
+  <path d="M38 8 L52 22 H41 A3 3 0 0 1 38 19 Z" fill="url(#flg)"/>
+  <polygon points="32,24 44,30 32,36 20,30" fill="url(#cube)"/>
+  <polygon points="20,30 32,36 32,48 20,42" fill="#0284C7"/>
+  <polygon points="44,30 32,36 32,48 44,42" fill="#0369A1"/>
+  <circle cx="32" cy="18" r="2" fill="#38BDF8"/>
+</svg>""",
+
+    "print": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="prg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00E5FF"/><stop offset="1" stop-color="#3B82F6"/>
+    </linearGradient>
+    <linearGradient id="noz" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F59E0B"/><stop offset="1" stop-color="#D97706"/>
+    </linearGradient>
+  </defs>
+  <path d="M14 12 H50 M14 52 H50 M14 12 V52 M50 12 V52" fill="none" stroke="#475569" stroke-width="4" stroke-linecap="round"/>
+  <line x1="14" y1="26" x2="50" y2="26" stroke="#64748B" stroke-width="3"/>
+  <polygon points="32,34 27,24 37,24" fill="url(#noz)"/>
+  <rect x="22" y="44" width="20" height="6" rx="2" fill="url(#prg)"/>
+  <rect x="25" y="38" width="14" height="6" rx="2" fill="#38BDF8"/>
+</svg>""",
+
+    "folder": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="fdg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBBF24"/><stop offset="1" stop-color="#D97706"/>
+    </linearGradient>
+    <linearGradient id="fbg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F59E0B"/><stop offset="1" stop-color="#B45309"/>
+    </linearGradient>
+  </defs>
+  <path d="M8 18 A4 4 0 0 1 12 14 H24 L30 20 H52 A4 4 0 0 1 56 24 V46 A4 4 0 0 1 52 50 H12 A4 4 0 0 1 8 46 Z" fill="url(#fbg)"/>
+  <path d="M8 25 A4 4 0 0 1 12 21 H52 A4 4 0 0 1 56 25 V46 A4 4 0 0 1 52 50 H12 A4 4 0 0 1 8 46 Z" fill="url(#fdg)"/>
+</svg>""",
+
+    "back": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bkg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#0284C7"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="28" fill="#1E293B" stroke="url(#bkg)" stroke-width="3"/>
+  <path d="M38 20 L26 32 L38 44" fill="none" stroke="#38BDF8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>""",
+
+    "list": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <g stroke="#38BDF8" stroke-width="4" stroke-linecap="round">
+    <line x1="22" y1="18" x2="52" y2="18"/>
+    <line x1="22" y1="32" x2="52" y2="32"/>
+    <line x1="22" y1="46" x2="52" y2="46"/>
+  </g>
+  <circle cx="12" cy="18" r="3" fill="#38BDF8"/>
+  <circle cx="12" cy="32" r="3" fill="#38BDF8"/>
+  <circle cx="12" cy="46" r="3" fill="#38BDF8"/>
+</svg>""",
+
+    "grid": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="10" y="10" width="18" height="18" rx="4" fill="#38BDF8"/>
+  <rect x="36" y="10" width="18" height="18" rx="4" fill="#38BDF8"/>
+  <rect x="10" y="36" width="18" height="18" rx="4" fill="#38BDF8"/>
+  <rect x="36" y="36" width="18" height="18" rx="4" fill="#38BDF8"/>
+</svg>""",
+
+    "tune": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <g stroke="#38BDF8" stroke-width="4" stroke-linecap="round">
+    <line x1="16" y1="10" x2="16" y2="54"/>
+    <line x1="32" y1="10" x2="32" y2="54"/>
+    <line x1="48" y1="10" x2="48" y2="54"/>
+  </g>
+  <circle cx="16" cy="22" r="6" fill="#0284C7" stroke="#38BDF8" stroke-width="2.5"/>
+  <circle cx="32" cy="42" r="6" fill="#0284C7" stroke="#38BDF8" stroke-width="2.5"/>
+  <circle cx="48" cy="28" r="6" fill="#0284C7" stroke="#38BDF8" stroke-width="2.5"/>
+</svg>""",
+
+    "pause": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="16" y="12" width="10" height="40" rx="3" fill="#FBBF24"/>
+  <rect x="38" y="12" width="10" height="40" rx="3" fill="#FBBF24"/>
+</svg>""",
+
+    "resume": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <polygon points="18,12 52,32 18,52" fill="#34D399"/>
+</svg>""",
+
+    "cancel": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <circle cx="32" cy="32" r="28" fill="#EF4444" fill-opacity="0.2" stroke="#EF4444" stroke-width="3"/>
+  <line x1="22" y1="22" x2="42" y2="42" stroke="#EF4444" stroke-width="5" stroke-linecap="round"/>
+  <line x1="42" y1="22" x2="22" y2="42" stroke="#EF4444" stroke-width="5" stroke-linecap="round"/>
+</svg>""",
+
+    "refresh": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <path d="M48 32 A18 18 0 1 1 42.7 19.3" fill="none" stroke="#38BDF8" stroke-width="5" stroke-linecap="round"/>
+  <polygon points="46,10 52,22 40,22" fill="#38BDF8"/>
+</svg>""",
 })
 
 

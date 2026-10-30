@@ -245,6 +245,20 @@ QProgressBar#TempBar[kind="bed"]::chunk {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00E5FF, stop:1 #3A86FF);
 }}
 
+QProgressBar#PrintProgressBar {{
+    background: rgba(255, 255, 255, 16);
+    border: 1px solid rgba(255, 255, 255, 24);
+    border-radius: {px(6)};
+    text-align: center;
+    color: #FFFFFF;
+    font-size: {px(11)};
+    font-weight: 800;
+}}
+QProgressBar#PrintProgressBar::chunk {{
+    border-radius: {px(5)};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00E5FF, stop:1 #3A86FF);
+}}
+
 /* ---------- Load Cell Probe Strip on Home Page ---------- */
 QFrame#LoadCellStrip {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
