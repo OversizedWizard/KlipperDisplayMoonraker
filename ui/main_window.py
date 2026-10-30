@@ -29,7 +29,7 @@ def _s(v: float, s: float) -> int:
 class Sidebar(QtWidgets.QFrame):
     page_selected = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, host: str = None, parent=None):
         super().__init__(parent)
         self.setObjectName("Sidebar")
 
@@ -80,7 +80,7 @@ class Sidebar(QtWidgets.QFrame):
 
 
 class TopBar(QtWidgets.QFrame):
-    def __init__(self, parent=None):
+    def __init__(self, host: str = None, parent=None):
         super().__init__(parent)
         self.setObjectName("TopBar")
         self._layout = QtWidgets.QHBoxLayout(self)
@@ -265,8 +265,9 @@ class MainWindow(QtWidgets.QWidget):
 
         self.sidebar.page_selected.connect(self.show_page)
 
-        # Live Moonraker client (tries 127.0.0.1:7125 then 192.168.0.99:7125)
-        self.moonraker = MoonrakerClient(parent=self)
+        # Live Moonraker client (connects to local 127.0.0.1:7125)
+        hosts = [host] if host else None
+        self.moonraker = MoonrakerClient(hosts=hosts, parent=self)
         self.moonraker.connection_changed.connect(self._on_connection_changed)
         self.moonraker.config_loaded.connect(self._on_config_loaded)
         self.moonraker.firmware_info_updated.connect(self.pages["settings"].update_firmware_info)
