@@ -35,6 +35,18 @@ def format_size(bytes_val: int) -> str:
     return f"{bytes_val / (1024 * 1024):.1f} MB"
 
 
+def _resolve_gcode_path(filename: str, current_dir: str) -> str:
+    """Return path relative to gcodes root without duplicating directory prefixes."""
+    fn = (filename or "").replace("gcodes/", "").lstrip("/")
+    clean_dir = (current_dir or "").replace("gcodes/", "").replace("gcodes", "").strip("/")
+    if not clean_dir:
+        return fn
+    prefix = clean_dir + "/"
+    while fn.startswith(prefix):
+        fn = fn[len(prefix):]
+    return f"{clean_dir}/{fn}" if fn else clean_dir
+
+
 class FileDetailsDialog(QtWidgets.QFrame):
     """Modal overlay displaying detailed metadata and Start Print action for a gcode file."""
     start_print_requested = Signal(dict)
@@ -210,7 +222,10 @@ class FileDetailsDialog(QtWidgets.QFrame):
     def _on_meta_loaded(self, meta: dict):
         if not meta:
             return
+        orig_fn = self.file_info.get("filename")
         self.file_info.update(meta)
+        if orig_fn:
+            self.file_info["filename"] = orig_fn.split("/")[-1]
         est = meta.get("estimated_time")
         if est:
             self.time_val.setText(format_duration(est))
@@ -354,7 +369,10 @@ class FileGridCard(QtWidgets.QFrame):
     def _on_metadata_loaded(self, meta: dict):
         if not meta:
             return
+        orig_fn = self.item.get("filename")
         self.item.update(meta)
+        if orig_fn:
+            self.item["filename"] = orig_fn.split("/")[-1]
         est = meta.get("estimated_time")
         if est:
             self.sub_lbl.setText(f"⏱ {format_duration(est)}")
@@ -482,7 +500,10 @@ class FileListRow(QtWidgets.QFrame):
     def _on_metadata_loaded(self, meta: dict):
         if not meta:
             return
+        orig_fn = self.item.get("filename")
         self.item.update(meta)
+        if orig_fn:
+            self.item["filename"] = orig_fn.split("/")[-1]
         est = meta.get("estimated_time")
         sz = format_size(self.item.get("size", 0))
         if est:
@@ -738,8 +759,9 @@ class FilesPage(QtWidgets.QWidget):
 
     def _on_file_clicked(self, item: dict):
         main_win = self.window()
-        full_path = f"{self.current_dir.replace('gcodes/', '')}/{item.get('filename')}" if self.current_dir != "gcodes" else item.get('filename')
+        full_path = _resolve_gcode_path(item.get("filename", ""), self.current_dir)
         dlg_info = dict(item)
+        dlg_info["filename"] = (item.get("filename") or "").split("/")[-1]
         dlg_info["full_path"] = full_path
         dlg_info["dir_path"] = self.current_dir
 
@@ -752,10 +774,8 @@ class FilesPage(QtWidgets.QWidget):
         main_win = self.window()
         mr = self.moonraker or getattr(main_win, "moonraker", None)
 
-        fn = file_info.get("filename", "") or file_info.get("path", "")
-        clean_dir = self.current_dir.replace("gcodes/", "").replace("gcodes", "").strip("/")
-        full_fn = f"{clean_dir}/{fn}" if clean_dir else fn
-        clean_full_fn = full_fn.replace("gcodes/", "").lstrip("/")
+        raw_fn = file_info.get("full_path") or file_info.get("filename", "") or file_info.get("path", "")
+        clean_full_fn = _resolve_gcode_path(raw_fn, self.current_dir)
 
         # 1. Update PrintingPage immediately with thumbnail preview and metadata
         if hasattr(main_win, "pages") and "printing" in main_win.pages:

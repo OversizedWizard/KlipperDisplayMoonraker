@@ -523,8 +523,12 @@ class PrintingPage(QtWidgets.QWidget):
         state = raw_state
         fn = st.get("filename", "")
 
+        # If user cancelled the print, do not revert to "starting" or "printing" while aborting
+        if self._print_state == "cancelled":
+            if raw_state in ("standby", "ready", "cancelled", "cancelling"):
+                state = "cancelled"
         # If user just initiated a print and Klipper is preparing/heating, keep "starting" state active
-        if self._print_state == "starting" and state in ("standby", "ready"):
+        elif self._print_state == "starting" and state in ("standby", "ready"):
             state = "starting"
 
         # Temps
@@ -768,18 +772,18 @@ class PrintingPage(QtWidgets.QWidget):
         overlay.raise_()
 
     def _do_cancel(self):
+        self._print_state = "cancelled"
         mr = getattr(self.window(), "moonraker", None)
         if mr:
-            mr.cooldown()
             mr.cancel_print()
-        self.status_pill.setText("🚫 CANCELLING...")
+        self.status_pill.setText("🚫 CANCELLED")
         self.status_pill.setStyleSheet("""
             color: #EF4444; background: rgba(239, 68, 68, 0.18);
             border: 1px solid #EF4444; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
         """)
         main_win = self.window()
         if hasattr(main_win, "show_page"):
-            QtCore.QTimer.singleShot(700, lambda: main_win.show_page("home"))
+            main_win.show_page("home")
 
     def _on_save_z_offset(self):
         mr = getattr(self.window(), "moonraker", None)

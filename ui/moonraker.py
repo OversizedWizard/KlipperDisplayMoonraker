@@ -8,6 +8,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.parse
 import urllib.request
 import uuid
@@ -515,13 +516,9 @@ class MoonrakerClient(QtCore.QObject):
         threading.Thread(target=_run, daemon=True).start()
 
     def start_print(self, filename: str, on_done=None):
-        """Start printing a gcode file immediately via G-code and Moonraker API."""
+        """Start printing a gcode file immediately via Moonraker API."""
         clean_fn = filename.replace("gcodes/", "").lstrip("/")
 
-        # 1. Immediate direct Klipper G-code command
-        self.send_gcode(f'SDCARD_PRINT_FILE FILENAME="{clean_fn}"')
-
-        # 2. Moonraker API call in background
         target_hosts = []
         if self.active_host:
             target_hosts.append(self.active_host)
@@ -533,9 +530,8 @@ class MoonrakerClient(QtCore.QObject):
             ok = False
             for target_host in target_hosts:
                 try:
-                    enc_fn = urllib.parse.quote(clean_fn)
                     body = json.dumps({"filename": clean_fn}).encode("utf-8")
-                    url = f"http://{target_host}/printer/print/start?filename={enc_fn}"
+                    url = f"http://{target_host}/printer/print/start"
                     req = urllib.request.Request(
                         url,
                         data=body,
@@ -548,6 +544,10 @@ class MoonrakerClient(QtCore.QObject):
                             break
                 except Exception as e:
                     print(f"[Moonraker] start_print error for {target_host}: {e}")
+
+            if not ok:
+                # Fallback to direct SDCARD_PRINT_FILE if endpoint failed
+                self.send_gcode(f'SDCARD_PRINT_FILE FILENAME="{clean_fn}"')
 
             if on_done:
                 self._dispatch_signal.emit(lambda: on_done(ok))
@@ -568,11 +568,56 @@ class MoonrakerClient(QtCore.QObject):
         self.send_gcode(cmd, on_done=on_done, timeout=5.0)
 
     def cancel_print(self, on_done=None):
-        """Cancel active print immediately and set cooldown straight away."""
-        cmd = "TURN_OFF_HEATERS\nM104 S0\nM140 S0\nM106 S0\nCANCEL_PRINT"
-        self.send_gcode(cmd)
-        self.post_endpoint("/printer/print/cancel", on_done=on_done, timeout=5.0)
-        self.cooldown()
+        """Cancel active print immediately and set cooldown straight away.
+        If Klipper is blocked inside a synchronous start macro (M190/M109/Z_TILT_ADJUST)
+        and /printer/print/cancel does not return within 1.5s, immediately break out of
+        the blocking loop via /printer/emergency_stop + /printer/firmware_restart.
+        """
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _post_json(ep: str, payload: dict, timeout: float = 2.0) -> bool:
+            try:
+                url = f"http://{host}{ep}"
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return resp.status == 200
+            except Exception:
+                return False
+
+        def _run():
+            # 1. Try standard Moonraker cancel with short 1.5s timeout
+            cancelled_ok = _post_json("/printer/print/cancel", {}, timeout=1.5)
+
+            if cancelled_ok:
+                # Standard cancel succeeded -> enforce immediate cooldown & reset SD state
+                cooldown_script = (
+                    "TURN_OFF_HEATERS\nM104 S0\nM140 S0\nM106 S0\n"
+                    "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0\n"
+                    "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0\n"
+                    "SDCARD_RESET_FILE\nCLEAR_PAUSE"
+                )
+                _post_json("/printer/gcode/script", {"script": cooldown_script}, timeout=2.0)
+            else:
+                # Klipper is blocked inside M190 / M109 / Z_TILT_ADJUST -> force break via emergency_stop + firmware_restart
+                _post_json("/printer/emergency_stop", {}, timeout=2.0)
+                time.sleep(0.6)
+                _post_json("/printer/firmware_restart", {}, timeout=3.0)
+                time.sleep(2.2)
+                cooldown_script = (
+                    "TURN_OFF_HEATERS\nM104 S0\nM140 S0\nM106 S0\n"
+                    "SDCARD_RESET_FILE\nCLEAR_PAUSE"
+                )
+                _post_json("/printer/gcode/script", {"script": cooldown_script}, timeout=2.0)
+
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(True))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def set_speed_factor(self, percent: int, on_done=None):
         """Set speed factor feedrate override (e.g. 100)."""

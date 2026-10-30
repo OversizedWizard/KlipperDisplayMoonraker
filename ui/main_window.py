@@ -341,19 +341,28 @@ class MainWindow(QtWidgets.QWidget):
         self.moonraker.start()
 
     def _on_print_stats_updated(self, st: dict):
-        if "printing" in self.pages:
-            self.pages["printing"].update_print_stats(st)
         state = st.get("state", "standby")
+        prev_state = getattr(self, "_last_raw_print_state", "standby")
+        self._last_raw_print_state = state
+
+        if "printing" in self.pages:
+            pp = self.pages["printing"]
+            if state == "printing" and prev_state != "printing":
+                pp._print_state = "printing"
+            pp.update_print_stats(st)
+
         if hasattr(self.sidebar, "set_print_state"):
             self.sidebar.set_print_state(state)
+
         # If print started while on files page, switch to printing screen
         if state == "printing" and getattr(self, "_current_page", "") == "files":
-            self.show_page("printing")
+            if getattr(self.pages.get("printing"), "_print_state", "") != "cancelled":
+                self.show_page("printing")
         # If print has cancelled while on printing page, set cooldown and return to home page
         elif state in ("cancelled", "cancelling") and getattr(self, "_current_page", "") == "printing":
             if hasattr(self, "moonraker") and self.moonraker:
                 self.moonraker.cooldown()
-            QtCore.QTimer.singleShot(700, lambda: self.show_page("home"))
+            self.show_page("home")
 
     def _on_connection_changed(self, connected: bool, host: str, klippy_state: str):
         self.topbar.set_connection(connected, host, klippy_state)
