@@ -255,6 +255,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
         super().__init__(parent)
         self._scale = scale
         self._busy = False
+        self._top_screws_enabled = False
         self._screws: List[Dict] = []
         self._selected_screw_idx = 1
         self._base_screw_idx = 1
@@ -420,7 +421,14 @@ class BedScrewsScreen(QtWidgets.QFrame):
         gb_lay.addWidget(self.guidance_note)
         side.addWidget(guidance_box)
 
-        # 3. Action Buttons: Move Toolhead, Probe This Screw, Probe All
+        # 3. Top Screws Mode Toggle (Moves 30mm out of way after probe)
+        self.btn_top_screws = QtWidgets.QPushButton()
+        self.btn_top_screws.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_top_screws.clicked.connect(self._toggle_top_screws)
+        self._update_top_screws_style()
+        side.addWidget(self.btn_top_screws)
+
+        # 4. Action Buttons: Move Toolhead, Probe This Screw, Probe All
         self.btn_move = QtWidgets.QPushButton("🎯  Move Toolhead Here")
         self.btn_move.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_move.setStyleSheet(_BTN_PRIMARY)
@@ -476,6 +484,68 @@ class BedScrewsScreen(QtWidgets.QFrame):
 
         self.apply_scale(scale)
         QtCore.QTimer.singleShot(40, self._load_screws_from_config)
+
+    def _toggle_top_screws(self):
+        self._top_screws_enabled = not self._top_screws_enabled
+        self._update_top_screws_style()
+        if self._top_screws_enabled:
+            self.status_lbl.setText("Top Screws Mode: ON. Toolhead will move 30mm out of the way after probing so you can adjust screws.")
+        else:
+            self.status_lbl.setText("Top Screws Mode: OFF. For under-bed screws (no extra clearance travel needed).")
+
+    def _update_top_screws_style(self):
+        if self._top_screws_enabled:
+            self.btn_top_screws.setText("🛠  Top Screws: ON (Clear 30mm)")
+            self.btn_top_screws.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(2, 132, 199, 0.4), stop:1 rgba(0, 229, 255, 0.4));
+                    border: 1.5px solid #00E5FF;
+                    border-radius: 7px;
+                    color: #00E5FF;
+                    font-size: 12px;
+                    font-weight: 800;
+                    min-height: 30px;
+                    padding: 2px 10px;
+                }
+                QPushButton:hover {
+                    background: rgba(0, 229, 255, 0.3);
+                }
+            """)
+        else:
+            self.btn_top_screws.setText("🛠  Top Screws: OFF (Under Bed)")
+            self.btn_top_screws.setStyleSheet("""
+                QPushButton {
+                    background: rgba(15, 23, 42, 0.7);
+                    border: 1px solid rgba(148, 163, 184, 0.25);
+                    border-radius: 7px;
+                    color: #94A3B8;
+                    font-size: 12px;
+                    font-weight: 700;
+                    min-height: 30px;
+                    padding: 2px 10px;
+                }
+                QPushButton:hover {
+                    border-color: rgba(255, 255, 255, 0.3);
+                    color: #FFFFFF;
+                }
+            """)
+
+    def _get_clearance_pos(self, sc: Dict) -> Tuple[float, float]:
+        """Calculate position 30mm out of the way for top screw adjustment.
+        If far left side screws move right (+30), if far right move left (-30).
+        """
+        bx, by = self._bed_size
+        sx, sy = float(sc["x"]), float(sc["y"])
+        # Far left side (x < bx * 0.35) -> move 30mm to the right (+30)
+        # Far right side (x > bx * 0.65) -> move 30mm to the left (-30)
+        # Center column -> move 30mm to the right (+30)
+        if sx < bx * 0.35:
+            target_x = min(bx - 5.0, sx + 30.0)
+        elif sx > bx * 0.65:
+            target_x = max(5.0, sx - 30.0)
+        else:
+            target_x = sx + 30.0 if (sx + 30.0 <= bx - 5.0) else sx - 30.0
+        return (round(target_x, 2), round(sy, 2))
 
     def _get_moonraker(self):
         p = self.parent()
@@ -812,6 +882,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
 
         speed_f = int(getattr(self, "_speed", 150.0) * 60)
         hop = int(getattr(self, "_hop_z", 10.0))
+        clear_x, clear_y = self._get_clearance_pos(sc)
 
         if needs_ref:
             self.status_lbl.setText(f"Getting Center Reference first ({base_sc['name']}), then probing Screw {sc['index']}...")
@@ -829,6 +900,8 @@ class BedScrewsScreen(QtWidgets.QFrame):
                 f"G1 Z{hop} F1200\n"
                 f"G90"
             )
+            if self._top_screws_enabled:
+                cmd += f"\nG1 X{clear_x:.2f} Y{clear_y:.2f} F{speed_f}"
         else:
             if sc.get("is_base", False):
                 self.status_lbl.setText(f"Probing Center Reference Screw ({sc['name']})...")
@@ -843,6 +916,8 @@ class BedScrewsScreen(QtWidgets.QFrame):
                 f"G1 Z{hop} F1200\n"
                 f"G90"
             )
+            if self._top_screws_enabled:
+                cmd += f"\nG1 X{clear_x:.2f} Y{clear_y:.2f} F{speed_f}"
 
         def _after_probe(ok):
             def _bg():
@@ -888,6 +963,12 @@ class BedScrewsScreen(QtWidgets.QFrame):
                     else:
                         self.status_lbl.setText("Probe completed.")
 
+                    if self._top_screws_enabled:
+                        self.canvas.set_toolhead(clear_x, clear_y)
+                        self.status_lbl.setText(f"{self.status_lbl.text()} (Toolhead moved 30mm clear)")
+                    else:
+                        self.canvas.set_toolhead(sc["x"], sc["y"])
+
                     self.canvas.update()
                     self._select_screw(self._selected_screw_idx)
 
@@ -918,6 +999,14 @@ class BedScrewsScreen(QtWidgets.QFrame):
         else:
             sim_val = 0.020 if sc["index"] == 3 else 0.090
             self._record_screw_reading(sc, sim_val)
+
+        if self._top_screws_enabled:
+            cx, cy = self._get_clearance_pos(sc)
+            self.canvas.set_toolhead(cx, cy)
+            self.status_lbl.setText(f"{self.status_lbl.text()} (Toolhead moved 30mm clear)")
+        else:
+            self.canvas.set_toolhead(sc["x"], sc["y"])
+
         self.canvas.update()
         self._select_screw(self._selected_screw_idx)
 
