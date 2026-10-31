@@ -1,10 +1,47 @@
-"""Power Page: Klipper service restart, MCU firmware restart, host reboot/shutdown, and emergency stop."""
+"""Power Page: Klipper service restart, MCU firmware restart, display service restart, host reboot/shutdown, and emergency stop."""
 
+import os
+import subprocess
+import sys
 from . import icons
 from .qt import QtWidgets, QtCore, QtGui, Qt, Signal
 
 def _s(v: float, s: float) -> int:
     return max(1, round(v * s))
+
+
+def restart_display_app(window=None):
+    """Restart the Klipper Display service / screen application cleanly."""
+    mr = getattr(window, "moonraker", None) if window else None
+    if mr and hasattr(mr, "stop"):
+        try:
+            mr.stop()
+        except Exception:
+            pass
+
+    def _do_exec():
+        if sys.platform.startswith("linux"):
+            try:
+                # If running under klipper-display.service and passwordless sudo is available, restart service
+                res = subprocess.run(
+                    ["systemctl", "is-active", "--quiet", "klipper-display.service"],
+                    timeout=1.0,
+                )
+                if res.returncode == 0:
+                    subprocess.Popen(
+                        ["sudo", "-n", "systemctl", "restart", "klipper-display.service"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+            except Exception:
+                pass
+        # Always replace current Python process in-place so screen app restarts immediately in all modes
+        try:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception:
+            QtWidgets.QApplication.quit()
+
+    QtCore.QTimer.singleShot(350, _do_exec)
 
 
 class PowerActionCard(QtWidgets.QFrame):
@@ -174,12 +211,20 @@ class PowerPage(QtWidgets.QWidget):
         self.grid.addWidget(self.shutdown_card, 3, 1)
         self.cards.append(self.shutdown_card)
 
-        # --- Section 3: Emergency Actions ---
-        sec3 = QtWidgets.QLabel("EMERGENCY ACTIONS")
+        # --- Section 3: Display & Emergency Actions ---
+        sec3 = QtWidgets.QLabel("DISPLAY SERVICE & EMERGENCY")
         sec3.setObjectName("SettingsSecHeader")
-        sec3.setStyleSheet("color: #F87171;")
         self.grid.addWidget(sec3, 4, 0, 1, 2)
         self.headers.append(sec3)
+
+        self.display_restart_card = PowerActionCard(
+            "reload", "Display Service Restart",
+            "Restart Klipper Display screen app.",
+            "DISPLAY APP",
+            on_click=self._on_display_restart
+        )
+        self.grid.addWidget(self.display_restart_card, 5, 0)
+        self.cards.append(self.display_restart_card)
 
         self.m112_card = PowerActionCard(
             "power", "Emergency Stop",
@@ -188,7 +233,7 @@ class PowerPage(QtWidgets.QWidget):
             on_click=self._on_emergency_stop,
             is_danger=True
         )
-        self.grid.addWidget(self.m112_card, 5, 0, 1, 2)
+        self.grid.addWidget(self.m112_card, 5, 1)
         self.cards.append(self.m112_card)
 
         self.vbox.addLayout(self.grid)
@@ -235,6 +280,11 @@ class PowerPage(QtWidgets.QWidget):
                 tile.sub_label.setText("Firmware restarted (offline mode)."),
                 QtCore.QTimer.singleShot(2000, lambda: self._reset_card(tile))
             ])
+
+    def _on_display_restart(self, tile: PowerActionCard):
+        tile.sub_label.setText("Restarting Klipper Display screen app...")
+        tile.badge_lbl.setText("RESTARTING...")
+        restart_display_app(self.window())
 
     def _on_emergency_stop(self, tile: PowerActionCard):
         tile.sub_label.setText("TRIGGERING EMERGENCY STOP (M112)...")

@@ -702,15 +702,28 @@ class ZOffsetScreen(QtWidgets.QFrame):
         delta_str = f"{sign}{self._clearance_delta:.3f} mm"
 
         mr = self._get_moonraker()
-        # If at paper test position (or homed), physically jog Z in real time!
-        if self._at_paper_pos and mr and mr.connected:
-            # step > 0: nozzle UP (+ clearance); step < 0: nozzle DOWN (- clearance)
-            jog_cmd = f"SET_GCODE_OFFSET Z_ADJUST={step:+.4f} MOVE=1 MOVE_SPEED=5"
-            mr.send_gcode(jog_cmd)
-            self.status_lbl.setText(f"Jogged Z by {step:+.3f} mm (Δ {delta_str}). Test paper friction.")
-            self.paper_status.setText(f"Live jog applied ({step:+.3f} mm). Slide paper to feel friction.")
+        if mr and mr.connected:
+            mr.adjust_z_offset(step)
+            if self._at_paper_pos:
+                self.status_lbl.setText(f"Jogged Z by {step:+.3f} mm (Δ {delta_str}). Test paper friction.")
+                self.paper_status.setText(f"Live jog applied ({step:+.3f} mm). Slide paper to feel friction.")
+            else:
+                self.status_lbl.setText(f"Target offset: {self._target_z:+.3f} mm (Δ {delta_str}). Tap Save to apply.")
         else:
             self.status_lbl.setText(f"Target offset: {self._target_z:+.3f} mm (Δ {delta_str}). Tap Save to apply.")
+
+        # Immediately reflect new Z location on Home screen & Print screen
+        win = self.window()
+        pages = getattr(win, "pages", {}) if win else {}
+        hp = pages.get("home")
+        if hp and hasattr(hp, "_coords") and hasattr(hp, "axis_cards"):
+            hp._coords["Z"] = round(float(hp._coords.get("Z", 0.0)) + step, 4)
+            is_h = ("z" in getattr(hp, "_homed", "")) if (mr and mr.connected) else True
+            hp.axis_cards["Z"].set_position(hp._coords["Z"], is_h)
+        pp = pages.get("printing")
+        if pp and hasattr(pp, "update_z_babystep"):
+            b_cnt = getattr(mr, "babystep_count", 0) if mr else round(self._clearance_delta / max(self._step_size, 0.001))
+            pp.update_z_babystep(self._clearance_delta, base_z=self._stored_z, step_count=b_cnt)
 
     def _on_reset(self):
         if self._busy:

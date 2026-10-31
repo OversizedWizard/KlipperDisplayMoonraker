@@ -71,6 +71,8 @@ class MoonrakerClient(QtCore.QObject):
         }
         self.last_print_stats: dict = {}
         self.last_bed_mesh: dict = {}
+        self.base_z_offset: float = 0.0
+        self.babystep_count: int = 0
         self._busy = False
         self._dispatch_signal.connect(lambda fn: fn())
 
@@ -135,12 +137,17 @@ class MoonrakerClient(QtCore.QObject):
                         self.bed_target = b_tgt
                         k_state = str(wh.get("state", "ready"))
 
-                        # Coordinates & homed axes
-                        pos = gcode_move.get("gcode_position") or toolhead.get("position") or [0.0, 0.0, 0.0, 0.0]
+                        homing_origin = gcode_move.get("homing_origin", [0.0, 0.0, 0.0, 0.0])
+                        z_offset = float(homing_origin[2]) if len(homing_origin) > 2 else 0.0
+
+                        # Coordinates & homed axes (use physical position so Z reflects SET_GCODE_OFFSET moves)
+                        pos = gcode_move.get("position") or toolhead.get("position") or gcode_move.get("gcode_position") or [0.0, 0.0, 0.0, 0.0]
                         x_pos = float(pos[0]) if len(pos) > 0 else 0.0
                         y_pos = float(pos[1]) if len(pos) > 1 else 0.0
                         z_pos = float(pos[2]) if len(pos) > 2 else 0.0
                         homed = str(toolhead.get("homed_axes", "")).lower()
+                        if "z" not in homed and abs(z_offset) > 1e-5:
+                            z_pos += z_offset
                         self.homed_axes = homed
 
                         # Live load cell probe force ({% set grams = printer.load_cell.force_g %})
@@ -190,8 +197,8 @@ class MoonrakerClient(QtCore.QObject):
                         ext_fac = float(gcode_move.get("extrude_factor", 1.0))
                         fan_spd = float(fan_obj.get("speed", 0.0))
 
-                        homing_origin = gcode_move.get("homing_origin", [0.0, 0.0, 0.0, 0.0])
-                        z_offset = float(homing_origin[2]) if len(homing_origin) > 2 else 0.0
+                        if abs(z_offset) < 1e-4:
+                            self.babystep_count = 0
 
                         stats_dict = {
                             "state": p_state,
@@ -206,6 +213,8 @@ class MoonrakerClient(QtCore.QObject):
                             "extrude_factor": ext_fac,
                             "fan_speed": fan_spd,
                             "z_offset": z_offset,
+                            "base_z_offset": self.base_z_offset,
+                            "babystep_count": self.babystep_count,
                             "nozzle_cur": n_cur,
                             "nozzle_tgt": n_tgt,
                             "bed_cur": b_cur,
@@ -312,6 +321,16 @@ class MoonrakerClient(QtCore.QObject):
             self.config = cfg_found
             self.objects = objs_found
             self.firmware_info = fw_info
+            for probe_key in ("load_cell_probe", "probe", "bltouch", "smart_effector", "beacon"):
+                if probe_key in cfg_found and "z_offset" in cfg_found[probe_key]:
+                    try:
+                        self.base_z_offset = float(cfg_found[probe_key]["z_offset"])
+                        break
+                    except (ValueError, TypeError):
+                        pass
+            if self.last_print_stats:
+                self.last_print_stats["base_z_offset"] = self.base_z_offset
+                self.print_stats_updated.emit(self.last_print_stats)
             self.config_loaded.emit(self.config, self.objects)
             self.firmware_info_updated.emit(self.firmware_info)
 
@@ -446,7 +465,11 @@ class MoonrakerClient(QtCore.QObject):
         """Relative jog for X, Y, or Z."""
         speed = 600 if axis.upper() == "Z" else 3000
         cmd = f"SAVE_GCODE_STATE NAME=_ui_jog\nG91\nG1 {axis.upper()}{distance:+f} F{speed}\nRESTORE_GCODE_STATE NAME=_ui_jog"
-        self.send_gcode(cmd, on_done, timeout=15.0)
+        def _after(ok):
+            self.poll_now()
+            if on_done:
+                on_done(ok)
+        self.send_gcode(cmd, _after, timeout=15.0)
 
     def home(self, axes: str = "", on_done=None):
         """Home specified axes (e.g. 'X Y', 'Z') or all axes if empty."""
@@ -653,7 +676,27 @@ class MoonrakerClient(QtCore.QObject):
 
     def adjust_z_offset(self, delta: float, on_done=None):
         """Babystep live Z offset by delta mm."""
-        self.send_gcode(f"SET_GCODE_OFFSET Z_ADJUST={delta:+.4f} MOVE=1 MOVE_SPEED=5", on_done=on_done)
+        if abs(delta) < 1e-6:
+            return
+        if hasattr(self, "last_print_stats") and self.last_print_stats:
+            new_z_off = float(self.last_print_stats.get("z_offset", 0.0)) + delta
+            if abs(new_z_off) < 1e-4:
+                self.babystep_count = 0
+            else:
+                self.babystep_count += (1 if delta > 0 else -1)
+        else:
+            self.babystep_count += (1 if delta > 0 else -1)
+
+        def _after(ok):
+            self.poll_now()
+            if on_done:
+                on_done(ok)
+
+        if "z" in (self.homed_axes or "").lower():
+            cmd = f"SET_GCODE_OFFSET Z_ADJUST={delta:+.4f} MOVE=1 MOVE_SPEED=5"
+        else:
+            cmd = f"SET_GCODE_OFFSET Z_ADJUST={delta:+.4f}"
+        self.send_gcode(cmd, on_done=_after)
 
     def save_z_offset(self, on_done=None):
         """Apply babystepped Z offset and persist to printer.cfg via SAVE_CONFIG."""

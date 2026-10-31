@@ -214,7 +214,10 @@ class AxisCoordCard(QtWidgets.QFrame):
         self._layout.addWidget(self.coord_lbl)
 
     def set_position(self, pos: float, is_homed: bool):
-        self.coord_lbl.setText(f"{pos:.2f} mm")
+        if self.axis == "Z" and abs(pos * 100 - round(pos * 100)) > 1e-4:
+            self.coord_lbl.setText(f"{pos:.3f} mm")
+        else:
+            self.coord_lbl.setText(f"{pos:.2f} mm")
         h_str = "true" if is_homed else "false"
         if self.homed_badge.property("homed") != h_str:
             self.homed_badge.setProperty("homed", h_str)
@@ -482,11 +485,11 @@ class HomePage(QtWidgets.QWidget):
         dist = self.selected_step * direction
         main_win = self.window()
         mr = getattr(main_win, "moonraker", None)
+        self._coords[axis] += dist
+        is_h = (axis.lower() in self._homed) if (mr and mr.connected) else True
+        self.axis_cards[axis].set_position(self._coords[axis], is_h)
         if mr and mr.connected:
             mr.jog(axis, dist)
-        else:
-            self._coords[axis] += dist
-            self.axis_cards[axis].set_position(self._coords[axis], True)
 
     def _on_home_all(self):
         if self._homing_busy:

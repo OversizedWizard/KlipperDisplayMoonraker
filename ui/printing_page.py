@@ -164,14 +164,14 @@ class PrintingPage(QtWidgets.QWidget):
 
         # Big Thumbnail image
         self.thumb_lbl = QtWidgets.QLabel()
-        self.thumb_lbl.setFixedSize(200, 200)
+        self.thumb_lbl.setFixedSize(172, 172)
         self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_lbl.setStyleSheet("""
             background: #1E293B;
             border: 1.5px solid rgba(0, 229, 255, 0.25);
             border-radius: 10px;
         """)
-        self.thumb_lbl.setPixmap(get_default_thumbnail(130))
+        self.thumb_lbl.setPixmap(get_default_thumbnail(120))
         left_layout.addWidget(self.thumb_lbl, 0, Qt.AlignmentFlag.AlignCenter)
 
         # File name
@@ -187,6 +187,49 @@ class PrintingPage(QtWidgets.QWidget):
         self.layer_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 800;")
         left_layout.addWidget(self.layer_lbl)
 
+        # Under-Image Z-Offset & Baby Steps Telemetry Box
+        self.z_info_card = QtWidgets.QFrame()
+        self.z_info_card.setObjectName("ZInfoCard")
+        self.z_info_card.setStyleSheet("""
+            QFrame#ZInfoCard {
+                background: rgba(15, 23, 42, 0.90);
+                border: 1px solid rgba(0, 229, 255, 0.30);
+                border-radius: 9px;
+            }
+            QLabel {
+                background: transparent;
+                border: none;
+            }
+        """)
+        z_info_lay = QtWidgets.QVBoxLayout(self.z_info_card)
+        z_info_lay.setContentsMargins(10, 7, 10, 7)
+        z_info_lay.setSpacing(4)
+
+        # Row 1: Adjusted Z-Offset
+        r1 = QtWidgets.QHBoxLayout()
+        r1.setSpacing(4)
+        lbl_adj_title = QtWidgets.QLabel("Z Adjust Offset")
+        lbl_adj_title.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800;")
+        self.adj_z_val_lbl = QtWidgets.QLabel("+0.000 mm")
+        self.adj_z_val_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 900; font-family: monospace;")
+        r1.addWidget(lbl_adj_title)
+        r1.addStretch(1)
+        r1.addWidget(self.adj_z_val_lbl)
+        z_info_lay.addLayout(r1)
+
+        # Row 2: Baby Steps Added
+        r2 = QtWidgets.QHBoxLayout()
+        r2.setSpacing(4)
+        lbl_bs_title = QtWidgets.QLabel("Baby Steps Added")
+        lbl_bs_title.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800;")
+        self.babystep_added_lbl = QtWidgets.QLabel("0  (+0.000 mm)")
+        self.babystep_added_lbl.setStyleSheet("color: #34D399; font-size: 11px; font-weight: 900; font-family: monospace;")
+        r2.addWidget(lbl_bs_title)
+        r2.addStretch(1)
+        r2.addWidget(self.babystep_added_lbl)
+        z_info_lay.addLayout(r2)
+
+        left_layout.addWidget(self.z_info_card)
         left_layout.addStretch(1)
         main_layout.addWidget(self.left_card, 0)
         self.left_card.setFixedWidth(240)
@@ -632,7 +675,9 @@ class PrintingPage(QtWidgets.QWidget):
             self.fan_lbl.setText(f"{fan}%")
 
         z_off = float(st.get("z_offset", 0.0))
-        self.babystep_lbl.setText(f"Z-Offset: {z_off:+.3f} mm")
+        base_z = float(st.get("base_z_offset", 0.0))
+        b_cnt = int(st.get("babystep_count", 0))
+        self.update_z_babystep(z_off, base_z=base_z, step_count=b_cnt)
 
         # State badge & action button switching
         if state == "printing" or self._print_state == "starting":
@@ -743,9 +788,29 @@ class PrintingPage(QtWidgets.QWidget):
 
         mr.get_file_metadata(filename, on_done=_on_meta)
 
+    def update_z_babystep(self, z_off: float, base_z: float = 0.0, step_count: int = 0):
+        """Update top badge and under-image Z Adjust Offset & Baby Steps Added telemetry."""
+        self.babystep_lbl.setText(f"Z-Offset: {z_off:+.3f} mm")
+        effective_z = (base_z - z_off) if abs(base_z) > 1e-4 else z_off
+        if hasattr(self, "adj_z_val_lbl"):
+            if abs(base_z) > 1e-4:
+                self.adj_z_val_lbl.setText(f"{effective_z:+.3f} mm")
+            else:
+                self.adj_z_val_lbl.setText(f"{z_off:+.3f} mm")
+        if hasattr(self, "babystep_added_lbl"):
+            if abs(z_off) < 1e-4:
+                self.babystep_added_lbl.setText("0  (+0.000 mm)")
+                self.babystep_added_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 800; font-family: monospace;")
+            else:
+                if step_count == 0:
+                    step_count = round(z_off / 0.01)
+                self.babystep_added_lbl.setText(f"{step_count:+d}  ({z_off:+.3f} mm)")
+                col = "#34D399" if z_off > 0 else "#FBBF24"
+                self.babystep_added_lbl.setStyleSheet(f"color: {col}; font-size: 11px; font-weight: 900; font-family: monospace;")
+
     def _set_thumb(self, pm: QtGui.QPixmap):
         if not pm.isNull():
-            sz = _s(190, self._scale)
+            sz = _s(164, self._scale)
             scaled = pm.scaled(sz, sz, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.thumb_lbl.setPixmap(scaled)
 
@@ -802,6 +867,6 @@ class PrintingPage(QtWidgets.QWidget):
     def apply_scale(self, s: float):
         self._scale = s
         self.left_card.setFixedWidth(_s(240, s))
-        sz = _s(190, s)
+        sz = _s(168, s)
         self.thumb_lbl.setFixedSize(sz, sz)
 

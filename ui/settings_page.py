@@ -699,6 +699,15 @@ class SettingsPage(QtWidgets.QWidget):
         self.grid_sys.addWidget(disp_card, 1, 0)
         self.sys_cards.append(disp_card)
 
+        self.disp_restart_card = SystemOptionTile(
+            "reload", "Display Service Restart",
+            "Restart Klipper Display screen app.",
+            "RESTART APP",
+            on_click=self._on_restart_display_service
+        )
+        self.grid_sys.addWidget(self.disp_restart_card, 1, 1)
+        self.sys_cards.append(self.disp_restart_card)
+
         self.grid_sys.setColumnMinimumWidth(0, 1)
         self.grid_sys.setColumnMinimumWidth(1, 1)
         self.grid_sys.setColumnStretch(0, 1)
@@ -810,6 +819,12 @@ class SettingsPage(QtWidgets.QWidget):
             main_win.open_sub_screen(view, title="System Loads & Firmware", return_page="settings")
         else:
             view.show()
+
+    def _on_restart_display_service(self, tile):
+        tile.sub_label.setText("Restarting Klipper Display screen app...")
+        tile.badge_lbl.setText("RESTARTING...")
+        from .power_page import restart_display_app
+        restart_display_app(self.window())
 
     def _on_display_info(self, tile):
         main_win = self.window()

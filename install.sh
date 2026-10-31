@@ -157,6 +157,8 @@ EOF
 
     sudo systemctl daemon-reload
     sudo systemctl enable klipper-display.service
+    echo "$CURRENT_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart klipper-display.service, /usr/bin/systemctl restart klipper-display.service" | sudo tee /etc/sudoers.d/klipper-display >/dev/null
+    sudo chmod 0440 /etc/sudoers.d/klipper-display
     echo -e "${C_GREEN}✓ Enabled klipper-display.service on boot.${C_RESET}"
 
     read -r -p "Would you like to start the display service now? (y/n) [default: y]: " START_NOW
