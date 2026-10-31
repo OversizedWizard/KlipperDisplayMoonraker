@@ -500,7 +500,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
         # 2. Extract Screw coordinates from screws_tilt_adjust or bed_screws
         sec = cfg.get("screws_tilt_adjust") or cfg.get("bed_screws") or {}
         screws: List[Dict] = []
-        for idx in range(1, 10):
+        for idx in range(1, 30):
             k = f"screw{idx}"
             if k in sec:
                 coords = sec[k]
