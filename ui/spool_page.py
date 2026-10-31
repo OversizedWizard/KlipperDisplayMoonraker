@@ -141,6 +141,11 @@ class SpoolPage(QtWidgets.QWidget):
         self._active_slot = 1
         self._has_ams = False
         self._ams_count = 4
+        self._extrude_dist = 10.0
+        self._live_nozzle_cur = 0.0
+        self._live_nozzle_tgt = 0.0
+        self._live_bed_cur = 0.0
+        self._live_bed_tgt = 0.0
         self._spools = dict(DEFAULT_SPOOLS)
         self._load_saved_spools()
 
@@ -360,59 +365,84 @@ class SpoolPage(QtWidgets.QWidget):
         self.vbox.addWidget(self.detail_frame)
         self.vbox.addSpacing(8)
 
-        # --- Section 3: Quick Action Load & Unload Buttons ---
-        self.actions_header = QtWidgets.QLabel("FILAMENT OPERATIONS")
+        # --- Section 3: Quick Action Load, Unload & Manual Extrude/Retract ---
+        ops_hdr_row = QtWidgets.QHBoxLayout()
+        self.actions_header = QtWidgets.QLabel("FILAMENT OPERATIONS & MANUAL EXTRUDE")
         self.actions_header.setObjectName("SettingsSecHeader")
-        self.vbox.addWidget(self.actions_header)
+        ops_hdr_row.addWidget(self.actions_header)
         self.headers.append(self.actions_header)
+        ops_hdr_row.addStretch(1)
+
+        self.live_temp_badge = QtWidgets.QLabel("● Nozzle: --.-°C")
+        self.live_temp_badge.setStyleSheet(
+            "color: #38BDF8; background: rgba(56, 189, 248, 0.14); border: 1px solid rgba(56, 189, 248, 0.45); "
+            "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 8px;"
+        )
+        ops_hdr_row.addWidget(self.live_temp_badge)
+        self.vbox.addLayout(ops_hdr_row)
 
         btn_row = QtWidgets.QHBoxLayout()
-        btn_row.setSpacing(12)
+        btn_row.setSpacing(10)
 
         # 1. Load Filament (LOAD_FILAMENT)
         self.load_btn = QtWidgets.QPushButton("📥  Load Filament")
         self.load_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.load_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10B981, stop:1 #059669);
-                border: 1px solid #34D399;
-                color: #FFFFFF;
-                font-weight: 800;
-                font-size: 13px;
-                border-radius: 10px;
-                padding: 12px 18px;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #34D399, stop:1 #10B981);
-            }
-        """)
         self.load_btn.clicked.connect(self._on_load_filament)
         btn_row.addWidget(self.load_btn, 1)
 
         # 2. Unload Filament (UNLOAD_FILAMENT)
         self.unload_btn = QtWidgets.QPushButton("📤  Unload Filament")
         self.unload_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.unload_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #475569, stop:1 #334155);
-                border: 1px solid #64748B;
-                color: #FFFFFF;
-                font-weight: 800;
-                font-size: 13px;
-                border-radius: 10px;
-                padding: 12px 18px;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #64748B, stop:1 #475569);
-            }
-        """)
         self.unload_btn.clicked.connect(self._on_unload_filament)
         btn_row.addWidget(self.unload_btn, 1)
 
+        # 3. Preheat to Spool Temperature
+        self.preheat_btn = QtWidgets.QPushButton("🔥  Heat Nozzle")
+        self.preheat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.preheat_btn.clicked.connect(self._on_heat_spool_nozzle)
+        btn_row.addWidget(self.preheat_btn, 1)
+
         self.vbox.addLayout(btn_row)
 
+        # Manual Extrude & Retract Bar
+        ext_card = QtWidgets.QFrame()
+        ext_card.setObjectName("CalibrateCard")
+        ext_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        ext_lay = QtWidgets.QHBoxLayout(ext_card)
+        ext_lay.setContentsMargins(10, 6, 10, 6)
+        ext_lay.setSpacing(8)
+
+        dist_lbl = QtWidgets.QLabel("Length:")
+        dist_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 800;")
+        ext_lay.addWidget(dist_lbl)
+
+        self.dist_btns = {}
+        for d in (5, 10, 25, 50):
+            b = QtWidgets.QPushButton(f"{d}mm")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFixedHeight(32)
+            b.clicked.connect(lambda _c=False, val=float(d): self._set_extrude_dist(val))
+            ext_lay.addWidget(b)
+            self.dist_btns[float(d)] = b
+
+        ext_lay.addSpacing(4)
+
+        self.btn_extrude = QtWidgets.QPushButton("⬇  Extrude")
+        self.btn_extrude.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_extrude.setFixedHeight(34)
+        self.btn_extrude.clicked.connect(lambda: self._on_manual_extrude(+self._extrude_dist))
+        ext_lay.addWidget(self.btn_extrude, 1)
+
+        self.btn_retract = QtWidgets.QPushButton("⬆  Retract")
+        self.btn_retract.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_retract.setFixedHeight(34)
+        self.btn_retract.clicked.connect(lambda: self._on_manual_extrude(-self._extrude_dist))
+        ext_lay.addWidget(self.btn_retract, 1)
+
+        self.vbox.addWidget(ext_card)
+
         self.status_lbl = QtWidgets.QLabel("")
-        self.status_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-weight: 700; margin-top: 4px;")
+        self.status_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-weight: 700; margin-top: 2px;")
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.vbox.addWidget(self.status_lbl)
 
@@ -421,6 +451,7 @@ class SpoolPage(QtWidgets.QWidget):
         main_layout.addWidget(self.scroll)
 
         # Initialize UI with Spool 1
+        self._set_extrude_dist(10.0)
         self._refresh_spool_display()
 
     def update_config(self, config: dict, objects: list = None):
@@ -554,11 +585,106 @@ class SpoolPage(QtWidgets.QWidget):
         self._save_spools()
         self._refresh_spool_display()
 
+    def update_temps(self, n_cur: float, n_tgt: float, b_cur: float, b_tgt: float):
+        """Receive live nozzle and bed temperatures from MoonrakerClient."""
+        self._live_nozzle_cur = float(n_cur)
+        self._live_nozzle_tgt = float(n_tgt)
+        self._live_bed_cur = float(b_cur)
+        self._live_bed_tgt = float(b_tgt)
+
+        if n_cur >= 180.0:
+            tgt_str = f" / {n_tgt:.0f}°C" if n_tgt > 0 else ""
+            self.live_temp_badge.setText(f"🔥 Nozzle: {n_cur:.1f}°C{tgt_str} (HOT)")
+            self.live_temp_badge.setStyleSheet(
+                "color: #FFFFFF; background: #EF4444; border: 1px solid #F87171; "
+                "border-radius: 6px; font-size: 11px; font-weight: 900; padding: 2px 8px;"
+            )
+        elif n_tgt > 0:
+            self.live_temp_badge.setText(f"🔥 Heating Nozzle: {n_cur:.1f}°C → {n_tgt:.0f}°C")
+            self.live_temp_badge.setStyleSheet(
+                "color: #FBBF24; background: rgba(245, 158, 11, 0.18); border: 1px solid #F59E0B; "
+                "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 8px;"
+            )
+        else:
+            self.live_temp_badge.setText(f"● Nozzle: {n_cur:.1f}°C (Idle)")
+            self.live_temp_badge.setStyleSheet(
+                "color: #38BDF8; background: rgba(56, 189, 248, 0.14); border: 1px solid rgba(56, 189, 248, 0.45); "
+                "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 8px;"
+            )
+
+    def _set_extrude_dist(self, dist: float):
+        self._extrude_dist = dist
+        s = self._scale
+        for d, btn in self.dist_btns.items():
+            active = abs(d - dist) < 0.01
+            if active:
+                btn.setStyleSheet(
+                    f"background: #00E5FF; color: #0F172A; border: 1px solid #00E5FF; "
+                    f"border-radius: {_s(6, s)}px; font-size: {_s(11, s)}px; font-weight: 900; padding: 0 {_s(8, s)}px;"
+                )
+            else:
+                btn.setStyleSheet(
+                    f"background: #1E293B; color: #CBD5E1; border: 1px solid rgba(255,255,255,0.16); "
+                    f"border-radius: {_s(6, s)}px; font-size: {_s(11, s)}px; font-weight: 700; padding: 0 {_s(8, s)}px;"
+                )
+        if hasattr(self, "btn_extrude"):
+            self.btn_extrude.setText(f"⬇  Extrude +{int(dist)}mm")
+        if hasattr(self, "btn_retract"):
+            self.btn_retract.setText(f"⬆  Retract -{int(dist)}mm")
+
+    def _get_moonraker(self):
+        mr = getattr(self, "moonraker", None)
+        if mr:
+            return mr
+        win = self.window()
+        return getattr(win, "moonraker", None)
+
+    def _on_heat_spool_nozzle(self):
+        spool_key = f"spool_{self._active_slot}"
+        data = self._spools.get(spool_key, DEFAULT_SPOOLS["spool_1"])
+        noz_temp = float(data.get("nozzle_temp", 210))
+        mr = self._get_moonraker()
+        if mr and mr.connected:
+            mr.set_temperature("extruder", noz_temp)
+            self.status_lbl.setText(f"🔥 Heating nozzle to {noz_temp:.0f}°C ({data.get('type', 'PLA')})...")
+        else:
+            self.status_lbl.setText(f"Target set: {noz_temp:.0f}°C")
+
+    def _on_manual_extrude(self, length_mm: float):
+        mr = self._get_moonraker()
+        spool_key = f"spool_{self._active_slot}"
+        data = self._spools.get(spool_key, DEFAULT_SPOOLS["spool_1"])
+        target_noz = float(data.get("nozzle_temp", 210))
+        cur_noz = self._live_nozzle_cur or (float(getattr(mr, "nozzle_temp", 0.0)) if mr else 0.0)
+        action_lbl = "Extruding" if length_mm > 0 else "Retracting"
+        spd = 5.0 if length_mm > 0 else 10.0
+
+        if mr and mr.connected:
+            if cur_noz < 170.0 and self._live_nozzle_tgt < 170.0:
+                mr.set_temperature("extruder", target_noz)
+                self.status_lbl.setText(
+                    f"🔥 Heating nozzle to {target_noz:.0f}°C & {action_lbl.lower()} {length_mm:+.0f}mm..."
+                )
+            else:
+                self.status_lbl.setText(f"⚙ {action_lbl} {abs(length_mm):.0f}mm at {cur_noz:.1f}°C...")
+
+            def _done(ok: bool):
+                if ok:
+                    self.status_lbl.setText(
+                        f"✓ Manual {'extrude' if length_mm > 0 else 'retract'} ({length_mm:+.0f}mm) complete"
+                    )
+                else:
+                    self.status_lbl.setText("⚠ Extrude rejected by Klipper (wait for nozzle to heat up)")
+
+            mr.extrude(length_mm, speed_mm_s=spd, on_done=_done)
+        else:
+            self.status_lbl.setText(f"Simulated {action_lbl}: {length_mm:+.0f}mm")
+
     def _on_load_filament(self):
         spool_key = f"spool_{self._active_slot}"
         data = self._spools.get(spool_key, DEFAULT_SPOOLS["spool_1"])
         main_win = self.window()
-        view = FilamentActionDialog(mode="load", spool_data=data, scale=self._scale, parent=self)
+        view = FilamentActionDialog(mode="load", spool_data=data, scale=self._scale, parent=main_win)
         if hasattr(main_win, "open_sub_screen"):
             main_win.open_sub_screen(view, title=f"Load Filament — Spool {self._active_slot}", return_page="spool")
         else:
@@ -568,7 +694,7 @@ class SpoolPage(QtWidgets.QWidget):
         spool_key = f"spool_{self._active_slot}"
         data = self._spools.get(spool_key, DEFAULT_SPOOLS["spool_1"])
         main_win = self.window()
-        view = FilamentActionDialog(mode="unload", spool_data=data, scale=self._scale, parent=self)
+        view = FilamentActionDialog(mode="unload", spool_data=data, scale=self._scale, parent=main_win)
         if hasattr(main_win, "open_sub_screen"):
             main_win.open_sub_screen(view, title=f"Unload Filament — Spool {self._active_slot}", return_page="spool")
         else:
@@ -593,18 +719,22 @@ class SpoolPage(QtWidgets.QWidget):
 
     def apply_scale(self, s: float):
         self._scale = s
-        m = _s(14, s)
-        self.vbox.setContentsMargins(m, m, m, m)
-        self.vbox.setSpacing(_s(8, s))
+        m = _s(12, s)
+        self.vbox.setContentsMargins(m, _s(8, s), m, _s(8, s))
+        self.vbox.setSpacing(_s(6, s))
 
         for h in self.headers:
-            h.setStyleSheet(f"font-size: {_s(11, s)}px; font-weight: 800; letter-spacing: 0.8px; color: #94A3B8; margin-top: {_s(6, s)}px; margin-bottom: {_s(2, s)}px;")
+            h.setStyleSheet(f"font-size: {_s(11, s)}px; font-weight: 800; letter-spacing: 0.8px; color: #94A3B8; margin-top: {_s(2, s)}px; margin-bottom: {_s(1, s)}px;")
 
         for btn in self.slot_buttons:
             s_data = self._spools.get(f"spool_{btn.slot_id}", DEFAULT_SPOOLS["spool_1"])
             btn.update_data(s_data, is_active=(btn.slot_id == self._active_slot), scale=s)
 
-        self.spool_icon_lbl.setPixmap(icons.pixmap("spool", _s(56, s)))
-        self.load_btn.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10B981, stop:1 #059669); border: 1px solid #34D399; color: #FFFFFF; font-weight: 800; font-size: {_s(12, s)}px; border-radius: {_s(10, s)}px; padding: {_s(10, s)}px {_s(16, s)}px;")
-        self.unload_btn.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #475569, stop:1 #334155); border: 1px solid #64748B; color: #FFFFFF; font-weight: 800; font-size: {_s(12, s)}px; border-radius: {_s(10, s)}px; padding: {_s(10, s)}px {_s(16, s)}px;")
+        self.spool_icon_lbl.setPixmap(icons.pixmap("spool", _s(52, s)))
+        self.load_btn.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10B981, stop:1 #059669); border: 1px solid #34D399; color: #FFFFFF; font-weight: 800; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: {_s(8, s)}px {_s(12, s)}px;")
+        self.unload_btn.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #475569, stop:1 #334155); border: 1px solid #64748B; color: #FFFFFF; font-weight: 800; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: {_s(8, s)}px {_s(12, s)}px;")
+        self.preheat_btn.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F97316, stop:1 #EA580C); border: 1px solid #FB923C; color: #FFFFFF; font-weight: 800; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: {_s(8, s)}px {_s(12, s)}px;")
+        self.btn_extrude.setStyleSheet(f"background: rgba(16, 185, 129, 0.22); border: 1.5px solid #10B981; color: #34D399; font-weight: 900; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: 0 {_s(12, s)}px;")
+        self.btn_retract.setStyleSheet(f"background: rgba(56, 189, 248, 0.20); border: 1.5px solid #38BDF8; color: #7DD3FC; font-weight: 900; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: 0 {_s(12, s)}px;")
+        self._set_extrude_dist(self._extrude_dist)
 

@@ -104,10 +104,20 @@ class FilamentActionDialog(QtWidgets.QFrame):
         self.right_card = QtWidgets.QFrame()
         self.right_card.setObjectName("DialogStepsBox")
         self.right_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.right_card.setStyleSheet("background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;")
+        self.right_card.setStyleSheet("""
+            QFrame#DialogStepsBox {
+                background: rgba(15, 23, 42, 0.75);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: 12px;
+            }
+            QFrame#DialogStepsBox QLabel {
+                border: none;
+                background: transparent;
+            }
+        """)
         rc_lay = QtWidgets.QVBoxLayout(self.right_card)
-        rc_lay.setContentsMargins(_s(12, scale), _s(10, scale), _s(12, scale), _s(10, scale))
-        rc_lay.setSpacing(_s(6, scale))
+        rc_lay.setContentsMargins(_s(12, scale), _s(8, scale), _s(12, scale), _s(8, scale))
+        rc_lay.setSpacing(_s(5, scale))
 
         # Status Banner
         self.status_title = QtWidgets.QLabel("STEP 1: HEATING NOZZLE")
@@ -116,12 +126,24 @@ class FilamentActionDialog(QtWidgets.QFrame):
 
         # Primary instruction callout
         self.instruction_box = QtWidgets.QFrame()
-        self.instruction_box.setStyleSheet("background: rgba(30, 41, 59, 0.85); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 6px;")
+        self.instruction_box.setObjectName("InstructionBox")
+        self.instruction_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.instruction_box.setStyleSheet("""
+            QFrame#InstructionBox {
+                background: rgba(30, 41, 59, 0.85);
+                border: 1px solid rgba(56, 189, 248, 0.35);
+                border-radius: 8px;
+            }
+            QFrame#InstructionBox QLabel {
+                border: none;
+                background: transparent;
+            }
+        """)
         ib_lay = QtWidgets.QVBoxLayout(self.instruction_box)
         ib_lay.setContentsMargins(8, 6, 8, 6)
 
         self.instruction_text = QtWidgets.QLabel("Nozzle is heating up to extrude temperature. Please wait...")
-        self.instruction_text.setStyleSheet("color: #FFFFFF; font-size: 12px; font-weight: 700;")
+        self.instruction_text.setStyleSheet("color: #FFFFFF; font-size: 11px; font-weight: 700;")
         self.instruction_text.setWordWrap(True)
         ib_lay.addWidget(self.instruction_text)
         rc_lay.addWidget(self.instruction_box)
@@ -175,6 +197,63 @@ class FilamentActionDialog(QtWidgets.QFrame):
         self.step3_lbl.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 600;")
         rc_lay.addWidget(self.step2_lbl)
         rc_lay.addWidget(self.step3_lbl)
+
+        # Manual Extrude & Retract Controls inside Load/Unload Dialog
+        rc_lay.addSpacing(4)
+        man_hdr = QtWidgets.QLabel("MANUAL EXTRUDE / RETRACT")
+        man_hdr.setStyleSheet("color: #00E5FF; font-size: 10px; font-weight: 800; letter-spacing: 0.5px;")
+        rc_lay.addWidget(man_hdr)
+
+        man_grid = QtWidgets.QGridLayout()
+        man_grid.setHorizontalSpacing(_s(6, scale))
+        man_grid.setVerticalSpacing(_s(6, scale))
+
+        btn_ext_10 = QtWidgets.QPushButton("⬇ Extrude +10mm")
+        btn_ext_25 = QtWidgets.QPushButton("⬇ Extrude +25mm")
+        btn_ret_10 = QtWidgets.QPushButton("⬆ Retract -10mm")
+        btn_ret_25 = QtWidgets.QPushButton("⬆ Retract -25mm")
+
+        for b, is_ext in ((btn_ext_10, True), (btn_ext_25, True), (btn_ret_10, False), (btn_ret_25, False)):
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFixedHeight(_s(30, scale))
+            if is_ext:
+                b.setStyleSheet(f"""
+                    QPushButton {{
+                        background: rgba(16, 185, 129, 0.18);
+                        border: 1px solid #10B981;
+                        color: #34D399;
+                        font-weight: 800;
+                        font-size: {_s(11, scale)}px;
+                        border-radius: {_s(6, scale)}px;
+                    }}
+                    QPushButton:hover {{ background: rgba(16, 185, 129, 0.32); color: #FFFFFF; }}
+                    QPushButton:pressed {{ background: #10B981; color: #0F172A; }}
+                """)
+            else:
+                b.setStyleSheet(f"""
+                    QPushButton {{
+                        background: rgba(56, 189, 248, 0.16);
+                        border: 1px solid #38BDF8;
+                        color: #7DD3FC;
+                        font-weight: 800;
+                        font-size: {_s(11, scale)}px;
+                        border-radius: {_s(6, scale)}px;
+                    }}
+                    QPushButton:hover {{ background: rgba(56, 189, 248, 0.30); color: #FFFFFF; }}
+                    QPushButton:pressed {{ background: #38BDF8; color: #0F172A; }}
+                """)
+
+        btn_ext_10.clicked.connect(lambda: self._on_manual_extrude(+10.0))
+        btn_ext_25.clicked.connect(lambda: self._on_manual_extrude(+25.0))
+        btn_ret_10.clicked.connect(lambda: self._on_manual_extrude(-10.0))
+        btn_ret_25.clicked.connect(lambda: self._on_manual_extrude(-25.0))
+
+        man_grid.addWidget(btn_ext_10, 0, 0)
+        man_grid.addWidget(btn_ext_25, 0, 1)
+        man_grid.addWidget(btn_ret_10, 1, 0)
+        man_grid.addWidget(btn_ret_25, 1, 1)
+        rc_lay.addLayout(man_grid)
+
         rc_lay.addStretch(1)
 
         split.addWidget(self.right_card, 1)
@@ -227,19 +306,52 @@ class FilamentActionDialog(QtWidgets.QFrame):
 
         # Polling timer for heater and sensor status
         self._poll_timer = QtCore.QTimer(self)
-        self._poll_timer.setInterval(400)
+        self._poll_timer.setInterval(350)
         self._poll_timer.timeout.connect(self._poll_status)
 
         self._detect_sensor()
         self._start_procedure()
 
+    def _get_moonraker(self):
+        """Find MoonrakerClient across parent chain or main window."""
+        p = self
+        while p is not None:
+            mr = getattr(p, "moonraker", None)
+            if mr is not None:
+                return mr
+            p = p.parent() if hasattr(p, "parent") and callable(p.parent) else None
+        win = self.window()
+        return getattr(win, "moonraker", None)
+
+    def _read_cached_nozzle_temp(self):
+        """Read latest known nozzle temperature from MoonrakerClient or HomePage."""
+        mr = self._get_moonraker()
+        if mr is not None:
+            nt = float(getattr(mr, "nozzle_temp", 0.0) or 0.0)
+            if nt <= 0.0 and hasattr(mr, "last_print_stats") and isinstance(mr.last_print_stats, dict):
+                nt = float(mr.last_print_stats.get("nozzle_cur", 0.0) or 0.0)
+            if nt > 0.0:
+                self.current_temp = nt
+                return
+        win = self.window()
+        if win and hasattr(win, "pages") and "home" in win.pages:
+            hp = win.pages["home"]
+            if hasattr(hp, "nozzle") and hasattr(hp.nozzle, "current_val"):
+                nt = float(hp.nozzle.current_val or 0.0)
+                if nt > 0.0:
+                    self.current_temp = nt
+
+    def _on_temps_updated(self, n_cur: float, n_tgt: float, _b_cur: float, _b_tgt: float):
+        if n_cur > 0.0:
+            self.current_temp = float(n_cur)
+        self._update_temp_ui_and_steps()
+
     def _detect_sensor(self):
         """Check if printer has a configured filament runout / switch sensor."""
-        main_win = self.window()
-        mr = getattr(main_win, "moonraker", None)
+        mr = self._get_moonraker()
         if mr:
-            cfg = getattr(mr, "config", {})
-            objs = getattr(mr, "objects", [])
+            cfg = getattr(mr, "config", {}) or {}
+            objs = getattr(mr, "objects", []) or []
             for k in cfg.keys():
                 if "filament_switch_sensor" in k or "filament_motion_sensor" in k:
                     self._has_sensor = True
@@ -260,25 +372,38 @@ class FilamentActionDialog(QtWidgets.QFrame):
             self.sensor_badge.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 700; background: rgba(255, 255, 255, 0.05); border-radius: 4px; padding: 2px 6px;")
 
     def _start_procedure(self):
-        """Send target temperature command to hotend and start tracking."""
-        main_win = self.window()
-        mr = getattr(main_win, "moonraker", None)
-        if mr and mr.connected:
-            mr.set_temperature("extruder", self.target_temp)
+        """Read current hotend temperature, heat if needed, and start tracking."""
+        self._read_cached_nozzle_temp()
+        mr = self._get_moonraker()
+        if mr:
+            if hasattr(mr, "temps_updated"):
+                try:
+                    mr.temps_updated.connect(self._on_temps_updated)
+                except Exception:
+                    pass
+            if mr.connected:
+                # If nozzle is already heated >= 185°C at an active target, keep or match target without blocking
+                live_tgt = float(getattr(mr, "nozzle_target", 0.0) or 0.0)
+                if self.current_temp >= 185.0 and live_tgt >= 180.0 and abs(self.current_temp - live_tgt) <= 5.0:
+                    self.target_temp = live_tgt
+                    self.sub_lbl.setText(f"Target: {self.target_temp:.0f}°C  •  {self.filament_type}")
+                else:
+                    mr.set_temperature("extruder", self.target_temp)
+
+        self._update_temp_ui_and_steps()
         self._poll_timer.start()
+        QtCore.QTimer.singleShot(50, self._poll_status)
 
     def _poll_status(self):
-        if self._is_cancelled or self._is_completed:
+        if self._is_cancelled:
             return
 
-        main_win = self.window()
-        mr = getattr(main_win, "moonraker", None)
-        
-        # Get live temps from home page cache or moonraker
-        if main_win and hasattr(main_win, "pages") and "home" in main_win.pages:
-            hp = main_win.pages["home"]
-            if hasattr(hp, "cards") and "nozzle" in hp.cards:
-                self.current_temp = float(hp.cards["nozzle"].current_val)
+        self._read_cached_nozzle_temp()
+        self._update_temp_ui_and_steps()
+
+    def _update_temp_ui_and_steps(self):
+        if self._is_cancelled:
+            return
 
         # Update progress and animation canvas
         self.anim_canvas.set_temp(self.current_temp, self.target_temp)
@@ -286,20 +411,23 @@ class FilamentActionDialog(QtWidgets.QFrame):
         self.temp_bar.setValue(pct)
         self.temp_lbl.setText(f"Nozzle Temp: {self.current_temp:.1f}°C / {self.target_temp:.0f}°C")
 
-        # Step progression logic
-        is_hot = (self.current_temp >= (self.target_temp - 3.0))
+        if self._is_completed:
+            return
+
+        # Consider hot when within 4°C of target OR already >= 185°C melting temp
+        is_hot = (self.current_temp >= (self.target_temp - 4.0)) or (self.current_temp >= 185.0)
 
         if not is_hot:
             self.status_title.setText("STEP 1: HEATING NOZZLE")
             self.status_title.setStyleSheet("color: #F59E0B; font-size: 13px; font-weight: 800;")
-            self.instruction_text.setText(f"Nozzle heating ({self.current_temp:.0f}°C → {self.target_temp:.0f}°C). Please wait before feeding/pulling...")
+            self.instruction_text.setText(f"Nozzle heating ({self.current_temp:.1f}°C → {self.target_temp:.0f}°C). Please wait before feeding/pulling...")
             self.anim_canvas.set_stage("heating")
             self.step1_lbl.setStyleSheet("color: #FBBF24; font-size: 11px; font-weight: 700;")
             self.step2_lbl.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 600;")
             self.step3_lbl.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 600;")
         else:
             # Temperature reached!
-            self.step1_lbl.setText("✔ 1. Hotend reached target temperature")
+            self.step1_lbl.setText(f"✔ 1. Hotend hot ({self.current_temp:.1f}°C) — Ready")
             self.step1_lbl.setStyleSheet("color: #10B981; font-size: 11px; font-weight: 700;")
 
             if self.mode == "load":
@@ -313,32 +441,51 @@ class FilamentActionDialog(QtWidgets.QFrame):
                     self.step2_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-weight: 700;")
                     self.action_btn.setText("Waiting for Sensor...")
                     self.action_btn.setEnabled(False)
-                    # Simulated trigger check or query
                     self._check_sensor_trigger()
                 else:
                     self.status_title.setText("STEP 2: FEEDING & EXTRUDING FILAMENT")
                     self.status_title.setStyleSheet("color: #10B981; font-size: 13px; font-weight: 800;")
-                    self.instruction_text.setText("Extruder motor is gripping and feeding filament through nozzle. Watch nozzle for clean purge.")
+                    self.instruction_text.setText("Extruder motor is gripping and feeding filament through nozzle. Use manual buttons below to purge more if needed.")
                     self.anim_canvas.set_stage("extruding")
                     self.anim_canvas.set_sensor_triggered(True)
                     self.step2_lbl.setText("✔ 2. Filament detected & gripped")
                     self.step2_lbl.setStyleSheet("color: #10B981; font-size: 11px; font-weight: 700;")
                     self.step3_lbl.setStyleSheet("color: #10B981; font-size: 11px; font-weight: 700;")
                     self._trigger_gcode_action()
-            else: # Unload
+            else:  # Unload
                 self.status_title.setText("STEP 2: RETRACTING & PULLING FILAMENT")
                 self.status_title.setStyleSheet("color: #F59E0B; font-size: 13px; font-weight: 800;")
-                self.instruction_text.setText("👉 Gears are retracting. You can now gently pull the filament free from the extruder.")
+                self.instruction_text.setText("👉 Gears are retracting. You can gently pull filament free or use Retract buttons below.")
                 self.anim_canvas.set_stage("pulling")
                 self.step2_lbl.setText("✔ 2. Filament molten tip retracted")
                 self.step2_lbl.setStyleSheet("color: #10B981; font-size: 11px; font-weight: 700;")
                 self.step3_lbl.setStyleSheet("color: #F59E0B; font-size: 11px; font-weight: 700;")
                 self._trigger_gcode_action()
 
+    def _on_manual_extrude(self, length_mm: float):
+        """Manually extrude (+length_mm) or retract (-length_mm) filament."""
+        mr = self._get_moonraker()
+        action_word = "Extruding" if length_mm > 0 else "Retracting"
+        spd = 5.0 if length_mm > 0 else 10.0
+        self.anim_canvas.set_stage("extruding" if length_mm > 0 else "pulling")
+        self.status_title.setText(f"MANUAL {action_word.upper()} ({length_mm:+.0f} mm)")
+        self.status_title.setStyleSheet("color: #00E5FF; font-size: 13px; font-weight: 800;")
+        self.instruction_text.setText(f"{action_word} {abs(length_mm):.0f} mm of filament at {self.current_temp:.1f}°C...")
+
+        if mr and mr.connected:
+            if self.current_temp < 170.0:
+                mr.set_temperature("extruder", self.target_temp)
+            def _done(ok: bool):
+                if not self._is_cancelled:
+                    self.instruction_text.setText(
+                        f"✔ Manual {'extrude' if length_mm > 0 else 'retract'} ({length_mm:+.0f} mm) complete."
+                        if ok else "⚠ Extrude command failed (check nozzle temperature)."
+                    )
+            mr.extrude(length_mm, speed_mm_s=spd, on_done=_done)
+
     def _check_sensor_trigger(self):
         """Query Moonraker for filament sensor switch state."""
-        main_win = self.window()
-        mr = getattr(main_win, "moonraker", None)
+        mr = self._get_moonraker()
         if mr and mr.connected and self._sensor_name:
             import urllib.request, json
             try:
@@ -364,33 +511,10 @@ class FilamentActionDialog(QtWidgets.QFrame):
             return
         self._gcode_sent = True
 
-        main_win = self.window()
-        mr = getattr(main_win, "moonraker", None)
-
-        cmd = f"LOAD_FILAMENT TEMP={self.target_temp:.0f}" if self.mode == "load" else f"UNLOAD_FILAMENT TEMP={self.target_temp:.0f}"
-        
-        if mr and mr.connected:
-            def on_done(ok):
-                self._on_action_completed(ok)
-            mr.send_gcode(cmd, on_done=on_done, timeout=120.0)
-        else:
-            QtCore.QTimer.singleShot(4000, lambda: self._on_action_completed(True))
-
-    def _on_action_completed(self, ok: bool):
-        self._is_completed = True
-        self._poll_timer.stop()
-        self.anim_canvas.set_stage("done")
-        
-        action_name = "Loaded" if self.mode == "load" else "Unloaded"
-        self.status_title.setText(f"SUCCESS: FILAMENT {action_name.upper()}!")
-        self.status_title.setStyleSheet("color: #10B981; font-size: 13px; font-weight: 800;")
-        
-        if self.mode == "load":
-            self.instruction_text.setText("✔ Filament successfully purged and loaded! Clean nozzle tip if needed.")
-            self.step3_lbl.setText("✔ 3. Purge complete and ready to print")
-        else:
-            self.instruction_text.setText("✔ Filament retracted and freed. You may remove the spool from the holder.")
-            self.step3_lbl.setText("✔ 3. Filament removed from toolhead")
+        mr = self._get_moonraker()
+        # Use current hot temp if already >= 185°C so M109 inside macro doesn't block waiting for a different preset temp
+        macro_temp = self.current_temp if self.current_temp >= 185.0 else self.target_temp
+        cmd = f"LOAD_FILAMENT TEMP={macro_temp:.0f}" if self.mode == "load" else f"UNLOAD_FILAMENT TEMP={macro_temp:.0f}"
 
         self.action_btn.setText("✔ Done")
         self.action_btn.setEnabled(True)
@@ -406,14 +530,47 @@ class FilamentActionDialog(QtWidgets.QFrame):
             }
         """)
 
+        if mr and mr.connected:
+            def on_done(ok):
+                self._on_action_completed(ok)
+            mr.send_gcode(cmd, on_done=on_done, timeout=120.0)
+        else:
+            QtCore.QTimer.singleShot(4000, lambda: self._on_action_completed(True))
+
+    def _on_action_completed(self, ok: bool):
+        self._is_completed = True
+        self.anim_canvas.set_stage("done")
+
+        action_name = "Loaded" if self.mode == "load" else "Unloaded"
+        self.status_title.setText(f"SUCCESS: FILAMENT {action_name.upper()}!")
+        self.status_title.setStyleSheet("color: #10B981; font-size: 13px; font-weight: 800;")
+
+        if self.mode == "load":
+            self.instruction_text.setText("✔ Filament loaded! Tap Extrude +10mm/+25mm below to purge more, or tap Done.")
+            self.step3_lbl.setText("✔ 3. Purge complete and ready to print")
+        else:
+            self.instruction_text.setText("✔ Filament retracted and freed. You may remove the spool from the holder.")
+            self.step3_lbl.setText("✔ 3. Filament removed from toolhead")
+
+        self.action_btn.setText("✔ Done")
+        self.action_btn.setEnabled(True)
+
+    def _cleanup_signals(self):
+        self._poll_timer.stop()
+        mr = self._get_moonraker()
+        if mr and hasattr(mr, "temps_updated"):
+            try:
+                mr.temps_updated.disconnect(self._on_temps_updated)
+            except Exception:
+                pass
+
     def _on_cancel(self):
         """Cancel filament operation immediately and turn off all heaters for safety."""
         self._is_cancelled = True
-        self._poll_timer.stop()
+        self._cleanup_signals()
         self.anim_canvas.set_stage("cancelled")
 
-        main_win = self.window()
-        mr = getattr(main_win, "moonraker", None)
+        mr = self._get_moonraker()
         if mr and mr.connected:
             mr.set_temperature("extruder", 0.0)
             mr.set_temperature("heater_bed", 0.0)
@@ -425,5 +582,6 @@ class FilamentActionDialog(QtWidgets.QFrame):
         QtCore.QTimer.singleShot(700, self._on_finish)
 
     def _on_finish(self):
+        self._cleanup_signals()
         self.closed.emit()
 

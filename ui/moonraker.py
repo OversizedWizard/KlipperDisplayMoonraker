@@ -48,6 +48,10 @@ class MoonrakerClient(QtCore.QObject):
         self.connected: bool = False
         self.klippy_state: str = "disconnected"
         self.homed_axes: str = ""
+        self.nozzle_temp: float = 0.0
+        self.nozzle_target: float = 0.0
+        self.bed_temp: float = 0.0
+        self.bed_target: float = 0.0
         self.live_load_cell_g: float = 0.0
         self.config: dict = {}
         self.objects: list = []
@@ -125,6 +129,10 @@ class MoonrakerClient(QtCore.QObject):
                         n_tgt = float(ext.get("target", 0.0))
                         b_cur = float(bed.get("temperature", 0.0))
                         b_tgt = float(bed.get("target", 0.0))
+                        self.nozzle_temp = n_cur
+                        self.nozzle_target = n_tgt
+                        self.bed_temp = b_cur
+                        self.bed_target = b_tgt
                         k_state = str(wh.get("state", "ready"))
 
                         # Coordinates & homed axes
@@ -453,6 +461,17 @@ class MoonrakerClient(QtCore.QObject):
         """Set target temperature for a heater ('extruder' or 'heater_bed'). 0 disables heater."""
         cmd = f"SET_HEATER_TEMPERATURE HEATER={heater} TARGET={target:.1f}"
         self.send_gcode(cmd, on_done)
+
+    def extrude(self, length_mm: float, speed_mm_s: float = 5.0, on_done=None):
+        """Relative extrude (+length_mm) or retract (-length_mm) filament."""
+        feedrate = max(60, round(abs(speed_mm_s) * 60))
+        cmd = (
+            "SAVE_GCODE_STATE NAME=_ui_extrude\n"
+            "M83\n"
+            f"G1 E{length_mm:+.2f} F{feedrate}\n"
+            "RESTORE_GCODE_STATE NAME=_ui_extrude"
+        )
+        self.send_gcode(cmd, on_done=on_done, timeout=35.0)
 
     def read_load_cell(self, on_done=None):
         """Execute LOAD_CELL_READ to measure attached weight."""

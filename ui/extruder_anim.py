@@ -126,7 +126,7 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
 
         # 4. Filament Runout Sensor Module (Near top of filament tube)
         sensor_y = 45.0
-        sensor_box = QtCore.QRectF(cx - 36, sensor_y, 72, 22)
+        sensor_box = QtCore.QRectF(cx - 50, sensor_y, 100, 22)
         painter.setPen(QtGui.QPen(QtGui.QColor(51, 65, 85), 1.5))
         painter.setBrush(QtGui.QColor(15, 23, 42, 220))
         painter.drawRoundedRect(sensor_box, 6, 6)
@@ -135,7 +135,7 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
         s_led_col = QtGui.QColor("#10B981") if self._sensor_triggered else QtGui.QColor("#F59E0B")
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(s_led_col)
-        painter.drawEllipse(QtCore.QPointF(cx - 22, sensor_y + 11), 4, 4)
+        painter.drawEllipse(QtCore.QPointF(cx - 38, sensor_y + 11), 4, 4)
 
         painter.setPen(QtGui.QColor("#E2E8F0"))
         font = painter.font()
@@ -143,7 +143,7 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
         font.setBold(True)
         painter.setFont(font)
         lbl_text = "SENSOR: OK" if self._sensor_triggered else "SENSOR: WAIT"
-        painter.drawText(QtCore.QRectF(cx - 14, sensor_y, 48, 22), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, lbl_text)
+        painter.drawText(QtCore.QRectF(cx - 28, sensor_y, 74, 22), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, lbl_text)
 
         # 5. Hotend Heatblock & Nozzle
         block_w = 44.0

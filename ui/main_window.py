@@ -320,6 +320,8 @@ class MainWindow(QtWidgets.QWidget):
         self.moonraker.config_loaded.connect(self._on_config_loaded)
         self.moonraker.firmware_info_updated.connect(self.pages["settings"].update_firmware_info)
         self.moonraker.temps_updated.connect(self.pages["home"].update_temps)
+        if "spool" in self.pages and hasattr(self.pages["spool"], "update_temps"):
+            self.moonraker.temps_updated.connect(self.pages["spool"].update_temps)
         if "printing" in self.pages and hasattr(self.pages["printing"], "update_temps"):
             self.moonraker.temps_updated.connect(self.pages["printing"].update_temps)
         self.moonraker.coords_updated.connect(self.pages["home"].update_coords)
