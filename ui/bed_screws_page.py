@@ -132,18 +132,19 @@ class BedScrewsCanvas(QtWidgets.QWidget):
 
             # Determine screw color based on tolerance
             if is_base:
-                col = C_GREEN
-                badge_txt = "BASE"
+                col = C_GREEN if sc.get("z") is not None else C_CYAN
+                badge_txt = "CENTER (REF)" if sc.get("z") is not None else "CENTER REF"
             elif diff is not None:
+                turn = sc.get("turn", "")
                 if abs(diff) <= ACCEPTABLE_TOLERANCE_MM:
                     col = C_GREEN
                     badge_txt = f"✓ {diff:+.2f}"
                 elif diff > ACCEPTABLE_TOLERANCE_MM:
                     col = C_RED
-                    badge_txt = f"▼ {diff:+.2f}"
+                    badge_txt = f"▼ {turn}" if turn else f"▼ {diff:+.2f}"
                 else:
                     col = C_AMBER
-                    badge_txt = f"▲ {diff:+.2f}"
+                    badge_txt = f"▲ {turn}" if turn else f"▲ {diff:+.2f}"
             else:
                 col = QtGui.QColor("#38BDF8")
                 badge_txt = f"#{idx}"
@@ -165,16 +166,16 @@ class BedScrewsCanvas(QtWidgets.QWidget):
             p.drawEllipse(pt, 4, 4)
 
             # Screw name & badge text
-            f.setPointSizeF(8.0)
+            f.setPointSizeF(7.5)
             p.setFont(f)
             p.setPen(QtGui.QColor("#FFFFFF"))
-            p.drawText(QtCore.QRectF(pt.x() - 40, pt.y() + 18, 80, 14), Qt.AlignmentFlag.AlignCenter, badge_txt)
+            p.drawText(QtCore.QRectF(pt.x() - 55, pt.y() + 18, 110, 14), Qt.AlignmentFlag.AlignCenter, badge_txt)
 
             name = sc.get("name", f"Screw {idx}")
             f.setPointSizeF(7.0)
             p.setFont(f)
             p.setPen(C_SLATE)
-            p.drawText(QtCore.QRectF(pt.x() - 50, pt.y() - 28, 100, 12), Qt.AlignmentFlag.AlignCenter, name.title())
+            p.drawText(QtCore.QRectF(pt.x() - 55, pt.y() - 28, 110, 12), Qt.AlignmentFlag.AlignCenter, name.title())
 
         p.end()
 
@@ -499,6 +500,10 @@ class BedScrewsScreen(QtWidgets.QFrame):
 
         # 2. Extract Screw coordinates from screws_tilt_adjust or bed_screws
         sec = cfg.get("screws_tilt_adjust") or cfg.get("bed_screws") or {}
+        self._screw_thread = str(sec.get("screw_thread", "CW-M3")).upper()
+        self._hop_z = float(sec.get("horizontal_move_z", 10.0))
+        self._speed = float(sec.get("speed", 150.0))
+
         screws: List[Dict] = []
         for idx in range(1, 30):
             k = f"screw{idx}"
@@ -515,25 +520,172 @@ class BedScrewsScreen(QtWidgets.QFrame):
                     "x": sx,
                     "y": sy,
                     "name": name,
-                    "is_base": (idx == 1),
+                    "is_base": False,
                     "z": None,
-                    "diff": 0.0 if idx == 1 else None,
+                    "diff": None,
                     "turn": None,
                 })
 
         if not screws:
             # Fallback to standard 4 corners if unconfigured
             screws = [
-                {"index": 1, "x": 30.0, "y": 30.0, "name": "front left screw", "is_base": True, "z": None, "diff": 0.0, "turn": None},
-                {"index": 2, "x": bx - 30.0, "y": 30.0, "name": "front right screw", "is_base": False, "z": None, "diff": None, "turn": None},
-                {"index": 3, "x": bx - 30.0, "y": by - 30.0, "name": "back right screw", "is_base": False, "z": None, "diff": None, "turn": None},
-                {"index": 4, "x": 30.0, "y": by - 30.0, "name": "back left screw", "is_base": False, "z": None, "diff": None, "turn": None},
+                {"index": 1, "x": bx / 2.0, "y": by / 2.0, "name": "center screw", "is_base": True, "z": None, "diff": None, "turn": None},
+                {"index": 2, "x": 30.0, "y": 30.0, "name": "front left screw", "is_base": False, "z": None, "diff": None, "turn": None},
+                {"index": 3, "x": bx - 30.0, "y": 30.0, "name": "front right screw", "is_base": False, "z": None, "diff": None, "turn": None},
+                {"index": 4, "x": bx - 30.0, "y": by - 30.0, "name": "back right screw", "is_base": False, "z": None, "diff": None, "turn": None},
+                {"index": 5, "x": 30.0, "y": by - 30.0, "name": "back left screw", "is_base": False, "z": None, "diff": None, "turn": None},
             ]
 
+        # Identify Center / Base Reference Screw
+        base_screw = None
+        for s in screws:
+            nm = s.get("name", "").lower()
+            if "center" in nm or "centre" in nm or "base" in nm:
+                base_screw = s
+                break
+        if not base_screw and screws:
+            cx, cy = bx / 2.0, by / 2.0
+            base_screw = min(screws, key=lambda s: (s["x"] - cx)**2 + (s["y"] - cy)**2)
+        if not base_screw and screws:
+            base_screw = screws[0]
+
+        for s in screws:
+            if base_screw and s["index"] == base_screw["index"]:
+                s["is_base"] = True
+                self._base_screw_idx = s["index"]
+            else:
+                s["is_base"] = False
+
         self._screws = screws
+        self._base_z = None
         self.canvas.set_screws(screws, self._bed_size)
-        self._select_screw(1)
-        self.status_lbl.setText(f"Loaded {len(screws)} bed screws from config. Bed size: {bx:.0f}x{by:.0f} mm.")
+        self._select_screw(self._base_screw_idx)
+        self.status_lbl.setText(f"Loaded {len(screws)} bed screws. Center reference: Screw {self._base_screw_idx} ({base_screw['name']}).")
+
+        # Automatically check if Moonraker already has recent screw tilt results
+        if mr and getattr(mr, "connected", False):
+            host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
+            threading.Thread(target=lambda: self._bg_check_initial_store(host), daemon=True).start()
+
+    def _bg_check_initial_store(self, host: str):
+        mr = self._get_moonraker()
+        matched = self._fetch_tilt_results_from_store(host)
+        if matched:
+            def _apply():
+                self.canvas.update()
+                self._select_screw(self._selected_screw_idx)
+                self.status_lbl.setText(f"Loaded {matched} screw tilt calculations from printer.")
+            if mr and hasattr(mr, "_dispatch_signal"):
+                mr._dispatch_signal.emit(_apply)
+            else:
+                QtCore.QTimer.singleShot(0, _apply)
+
+    def _fetch_tilt_results_from_store(self, host: str) -> int:
+        """Fetch and apply screws_tilt_calculate results from Moonraker gcode_store."""
+        try:
+            url = f"http://{host}/server/gcode_store?count=100"
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                if resp.status != 200:
+                    return 0
+                data = json.loads(resp.read().decode("utf-8"))
+                items = data.get("result", {}).get("gcode_store", [])
+
+            # Regex matching Klipper's screws_tilt_calculate output:
+            # // <name> : x=<x>, y=<y>, z=<z> [ : adjust <direction> <HH:MM> ]
+            regex = re.compile(
+                r"(?://\s*)?([a-zA-Z0-9_\s\(\)]+?)\s*:\s*x=([\d\.-]+),\s*y=([\d\.-]+),\s*z=([\d\.-]+)(?:\s*:\s*(?:adjust\s+)?([A-Z]+)\s+([\d:]+))?",
+                re.IGNORECASE,
+            )
+
+            parsed = []
+            base_z = None
+
+            for it in reversed(items):
+                msg = it.get("message", "").strip()
+                m = regex.search(msg)
+                if m:
+                    raw_name = m.group(1).strip()
+                    clean_name = re.sub(r"\s*\(base\)", "", raw_name, flags=re.IGNORECASE).strip().lower()
+                    x_val = float(m.group(2))
+                    y_val = float(m.group(3))
+                    z_val = float(m.group(4))
+                    turn_dir = m.group(5)
+                    turn_time = m.group(6)
+                    is_base = "base" in raw_name.lower() or turn_dir is None
+                    turn_str = f"{turn_dir.upper()} {turn_time}" if (turn_dir and turn_time) else ""
+
+                    if is_base and base_z is None:
+                        base_z = z_val
+
+                    parsed.append({
+                        "name": clean_name,
+                        "x": x_val,
+                        "y": y_val,
+                        "z": z_val,
+                        "turn": turn_str,
+                        "is_base": is_base,
+                    })
+                elif "means 1 full turn" in msg.lower():
+                    break
+
+            if not parsed:
+                return 0
+
+            if base_z is None:
+                base_item = next((p for p in parsed if p["is_base"]), parsed[-1])
+                base_z = base_item["z"]
+
+            self._base_z = base_z
+            matched_count = 0
+            for p in parsed:
+                target = None
+                for sc in self._screws:
+                    if abs(sc["x"] - p["x"]) <= 15.0 and abs(sc["y"] - p["y"]) <= 15.0:
+                        target = sc
+                        break
+                if not target:
+                    target = next(
+                        (sc for sc in self._screws if p["name"] in sc["name"].lower() or sc["name"].lower() in p["name"]),
+                        None
+                    )
+                if target:
+                    diff = round(p["z"] - base_z, 4)
+                    target["z"] = p["z"]
+                    target["diff"] = diff
+                    target["turn"] = p["turn"] or (self._calc_turn(diff) if not p["is_base"] else "")
+                    if p["is_base"]:
+                        target["is_base"] = True
+                        target["diff"] = 0.0
+                        target["turn"] = ""
+                    matched_count += 1
+
+            return matched_count
+        except Exception:
+            return 0
+
+    def _calc_turn(self, diff: float) -> str:
+        if abs(diff) <= ACCEPTABLE_TOLERANCE_MM:
+            return "LEVEL"
+        pitch = 0.5
+        th = getattr(self, "_screw_thread", "CW-M3").upper()
+        if "M4" in th:
+            pitch = 0.7
+        elif "M5" in th:
+            pitch = 0.8
+        elif "M3" in th:
+            pitch = 0.5
+
+        is_ccw = "CCW" in th
+        # On CW thread, bed too high (diff > 0) -> turn CW to tighten/lower
+        turn_dir = ("CCW" if is_ccw else "CW") if diff > 0 else ("CW" if is_ccw else "CCW")
+        fraction = abs(diff) / pitch
+        hours = int(fraction)
+        mins = int(round((fraction - hours) * 60))
+        if mins >= 60:
+            hours += 1
+            mins = 0
+        return f"{turn_dir} {hours:02d}:{mins:02d}"
 
     def _select_screw(self, idx: int):
         self._selected_screw_idx = idx
@@ -553,33 +705,49 @@ class BedScrewsScreen(QtWidgets.QFrame):
         turn = sc.get("turn", "")
 
         if is_base:
-            self.dev_val_lbl.setText("● BASE REFERENCE (0.00 mm)")
-            self.dev_val_lbl.setStyleSheet("color: #34D399; font-size: 14px; font-weight: 900; font-family: 'Consolas', monospace;")
-            self.guidance_note.setText("This is the base reference point. Adjust all other bed screws until they turn GREEN to match.")
-        elif diff is not None:
-            sign = "+" if diff > 0 else ""
-            diff_str = f"{sign}{diff:.3f} mm"
-
-            if abs(diff) <= ACCEPTABLE_TOLERANCE_MM:
-                self.dev_val_lbl.setText(f"✓ LEVEL ({diff_str})")
-                self.dev_val_lbl.setStyleSheet("color: #34D399; font-size: 15px; font-weight: 900; font-family: 'Consolas', monospace;")
-                self.guidance_note.setText("✓ EXCELLENT: Height deviation is within acceptable 1st layer tolerance (≤ 0.04 mm). No turn required!")
-            elif diff > ACCEPTABLE_TOLERANCE_MM:
-                # Bed is too high -> turn to lower
-                self.dev_val_lbl.setText(f"▼ TOO HIGH ({diff_str})")
-                self.dev_val_lbl.setStyleSheet("color: #EF4444; font-size: 15px; font-weight: 900; font-family: 'Consolas', monospace;")
-                turn_info = f" ({turn})" if turn else ""
-                self.guidance_note.setText(f"LOWER THIS CORNER: Bed is {diff:+.3f} mm too high. Turn screw knob Counter-Clockwise (CCW){turn_info} to lower.")
+            if self._base_z is not None:
+                self.dev_val_lbl.setText(f"● CENTER REF (Z = {self._base_z:.3f} mm)")
+                self.guidance_note.setText("✓ Center reference locked. Outer screws adjust relative to this point (only 1 reference needed).")
+                self.btn_probe.setText("🎯  Re-probe Center Reference")
             else:
-                # Bed is too low -> turn to raise
-                self.dev_val_lbl.setText(f"▲ TOO LOW ({diff_str})")
-                self.dev_val_lbl.setStyleSheet("color: #FBBF24; font-size: 15px; font-weight: 900; font-family: 'Consolas', monospace;")
-                turn_info = f" ({turn})" if turn else ""
-                self.guidance_note.setText(f"RAISE THIS CORNER: Bed is {abs(diff):.3f} mm too low. Turn screw knob Clockwise (CW){turn_info} to raise.")
+                self.dev_val_lbl.setText("● CENTER REF (Not Probed)")
+                self.guidance_note.setText("This is the Center Reference point. Probing will automatically measure this center reference first.")
+                self.btn_probe.setText("🎯  Probe Center Reference")
+            self.dev_val_lbl.setStyleSheet("color: #34D399; font-size: 14px; font-weight: 900; font-family: 'Consolas', monospace;")
         else:
-            self.dev_val_lbl.setText("Not yet probed (--)")
-            self.dev_val_lbl.setStyleSheet("color: #94A3B8; font-size: 14px; font-weight: 900; font-family: 'Consolas', monospace;")
-            self.guidance_note.setText("Tap 'Move Toolhead Here' and 'Probe This Screw' to measure clearance at this corner.")
+            if self._base_z is None:
+                self.btn_probe.setText("🔍  Probe (Gets Ref First)")
+            else:
+                self.btn_probe.setText(f"🔍  Probe Screw {idx}")
+
+            if diff is not None:
+                sign = "+" if diff > 0 else ""
+                diff_str = f"{sign}{diff:.3f} mm"
+
+                if abs(diff) <= ACCEPTABLE_TOLERANCE_MM:
+                    self.dev_val_lbl.setText(f"✓ LEVEL ({diff_str})")
+                    self.dev_val_lbl.setStyleSheet("color: #34D399; font-size: 15px; font-weight: 900; font-family: 'Consolas', monospace;")
+                    self.guidance_note.setText("✓ EXCELLENT: Height deviation is within acceptable 1st layer tolerance (≤ 0.04 mm). No turn required!")
+                elif diff > ACCEPTABLE_TOLERANCE_MM:
+                    # Bed is too high -> turn to lower
+                    self.dev_val_lbl.setText(f"▼ TOO HIGH ({diff_str})")
+                    self.dev_val_lbl.setStyleSheet("color: #EF4444; font-size: 15px; font-weight: 900; font-family: 'Consolas', monospace;")
+                    turn_action = f"Turn screw knob {turn}" if turn else "Turn screw knob to lower"
+                    self.guidance_note.setText(f"LOWER THIS SCREW: Bed is {diff:+.3f} mm higher than center reference. {turn_action}.")
+                else:
+                    # Bed is too low -> turn to raise
+                    self.dev_val_lbl.setText(f"▲ TOO LOW ({diff_str})")
+                    self.dev_val_lbl.setStyleSheet("color: #FBBF24; font-size: 15px; font-weight: 900; font-family: 'Consolas', monospace;")
+                    turn_action = f"Turn screw knob {turn}" if turn else "Turn screw knob to raise"
+                    self.guidance_note.setText(f"RAISE THIS SCREW: Bed is {abs(diff):.3f} mm lower than center reference. {turn_action}.")
+            else:
+                ref_hint = f"Ref: {self._base_z:.3f} mm" if self._base_z is not None else "Needs Ref First"
+                self.dev_val_lbl.setText(f"Not yet probed ({ref_hint})")
+                self.dev_val_lbl.setStyleSheet("color: #94A3B8; font-size: 14px; font-weight: 900; font-family: 'Consolas', monospace;")
+                if self._base_z is not None:
+                    self.guidance_note.setText(f"Center reference is locked (Z = {self._base_z:.3f} mm). Tap 'Probe' to measure this screw directly.")
+                else:
+                    self.guidance_note.setText("Center reference not yet recorded. Probing will automatically get center reference first, then probe this screw.")
 
     def _on_screw_selected_from_canvas(self, idx: int):
         self._select_screw(idx)
@@ -626,77 +794,145 @@ class BedScrewsScreen(QtWidgets.QFrame):
         if not sc or self._busy:
             return
 
+        base_sc = next((s for s in self._screws if s.get("is_base", False)), self._screws[0])
+        needs_ref = (self._base_z is None) and (not sc.get("is_base", False))
+
         self._busy = True
         self.btn_probe.setEnabled(False)
         self.btn_probe.setText("Probing...")
-        self.status_lbl.setText(f"Probing bed clearance at Screw {sc['index']}...")
 
         mr = self._get_moonraker()
         if not (mr and mr.connected):
             # Simulation mode
-            QtCore.QTimer.singleShot(800, lambda: self._apply_simulated_probe(sc))
+            QtCore.QTimer.singleShot(800, lambda: self._apply_simulated_probe(sc, base_sc, needs_ref))
             return
 
         host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
         start_t = time.time()
 
-        # Send PROBE command followed by safe Z lift
-        cmd = "PROBE\nG91\nG1 Z10 F1200\nG90"
+        speed_f = int(getattr(self, "_speed", 150.0) * 60)
+        hop = int(getattr(self, "_hop_z", 10.0))
+
+        if needs_ref:
+            self.status_lbl.setText(f"Getting Center Reference first ({base_sc['name']}), then probing Screw {sc['index']}...")
+            cmd = (
+                f"G90\n"
+                f"G1 Z{hop} F1200\n"
+                f"G1 X{base_sc['x']:.2f} Y{base_sc['y']:.2f} F{speed_f}\n"
+                f"PROBE\n"
+                f"G91\n"
+                f"G1 Z{hop} F1200\n"
+                f"G90\n"
+                f"G1 X{sc['x']:.2f} Y{sc['y']:.2f} F{speed_f}\n"
+                f"PROBE\n"
+                f"G91\n"
+                f"G1 Z{hop} F1200\n"
+                f"G90"
+            )
+        else:
+            if sc.get("is_base", False):
+                self.status_lbl.setText(f"Probing Center Reference Screw ({sc['name']})...")
+            else:
+                self.status_lbl.setText(f"Probing Screw {sc['index']} ({sc['name']}) using locked Center Reference...")
+            cmd = (
+                f"G90\n"
+                f"G1 Z{hop} F1200\n"
+                f"G1 X{sc['x']:.2f} Y{sc['y']:.2f} F{speed_f}\n"
+                f"PROBE\n"
+                f"G91\n"
+                f"G1 Z{hop} F1200\n"
+                f"G90"
+            )
 
         def _after_probe(ok):
-            # Parse measured Z from gcode_store
             def _bg():
-                measured_z = None
+                readings = []
                 try:
-                    url = f"http://{host}/server/gcode_store?count=25"
+                    url = f"http://{host}/server/gcode_store?count=40"
                     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                    with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    with urllib.request.urlopen(req, timeout=2.0) as resp:
                         if resp.status == 200:
                             data = json.loads(resp.read().decode("utf-8"))
-                            for item in reversed(data.get("result", {}).get("gcode_store", [])):
+                            for item in data.get("result", {}).get("gcode_store", []):
                                 if float(item.get("time", 0.0)) < start_t - 1.0:
                                     continue
                                 msg = item.get("message", "")
                                 m = re.search(r"(?:contact at|Result is)\s+z=\s*([\d\.-]+)", msg, re.IGNORECASE)
                                 if m:
-                                    measured_z = float(m.group(1))
-                                    break
+                                    readings.append(float(m.group(1)))
                 except Exception:
                     pass
 
                 def _apply():
                     self._busy = False
                     self.btn_probe.setEnabled(True)
-                    self.btn_probe.setText("🔍  Probe This Screw")
-                    if measured_z is not None:
-                        self._record_screw_reading(sc, measured_z)
+                    if needs_ref and len(readings) >= 2:
+                        ref_z = readings[0]
+                        target_z = readings[1]
+                        self._base_z = ref_z
+                        base_sc["z"] = ref_z
+                        base_sc["diff"] = 0.0
+                        base_sc["turn"] = ""
+                        self._record_screw_reading(sc, target_z)
+                        self.status_lbl.setText(f"Center Ref locked ({ref_z:.3f} mm). Screw {sc['index']} diff = {sc['diff']:+.3f} mm.")
+                    elif sc.get("is_base", False) and len(readings) >= 1:
+                        ref_z = readings[-1]
+                        self._base_z = ref_z
+                        base_sc["z"] = ref_z
+                        base_sc["diff"] = 0.0
+                        base_sc["turn"] = ""
+                        self.status_lbl.setText(f"Center Reference locked at Z = {ref_z:.3f} mm (only 1 reference needed).")
+                    elif len(readings) >= 1:
+                        target_z = readings[-1]
+                        self._record_screw_reading(sc, target_z)
                     else:
-                        self.status_lbl.setText("Probe completed. Reading captured.")
+                        self.status_lbl.setText("Probe completed.")
+
+                    self.canvas.update()
+                    self._select_screw(self._selected_screw_idx)
 
                 if hasattr(mr, "_dispatch_signal"):
                     mr._dispatch_signal.emit(_apply)
 
             threading.Thread(target=_bg, daemon=True).start()
 
-        mr.send_gcode(cmd, on_done=_after_probe, timeout=30.0)
+        mr.send_gcode(cmd, on_done=_after_probe, timeout=45.0)
 
-    def _apply_simulated_probe(self, sc: Dict):
+    def _apply_simulated_probe(self, sc: Dict, base_sc: Dict, needs_ref: bool):
         self._busy = False
         self.btn_probe.setEnabled(True)
-        self.btn_probe.setText("🔍  Probe This Screw")
-        sim_val = 0.025 if sc["index"] == 1 else (0.015 if sc["index"] == 2 else 0.120)
-        self._record_screw_reading(sc, sim_val)
+        if needs_ref:
+            self._base_z = 0.000
+            base_sc["z"] = 0.000
+            base_sc["diff"] = 0.0
+            base_sc["turn"] = ""
+            sim_val = 0.035 if sc["index"] == 2 else -0.115
+            self._record_screw_reading(sc, sim_val)
+            self.status_lbl.setText(f"Center Ref locked (0.000 mm). Screw {sc['index']} diff: {sc['diff']:+.3f} mm.")
+        elif sc.get("is_base", False):
+            self._base_z = 0.000
+            sc["z"] = 0.000
+            sc["diff"] = 0.0
+            sc["turn"] = ""
+            self.status_lbl.setText("Center Reference locked (0.000 mm). Only 1 reference needed!")
+        else:
+            sim_val = 0.020 if sc["index"] == 3 else 0.090
+            self._record_screw_reading(sc, sim_val)
+        self.canvas.update()
+        self._select_screw(self._selected_screw_idx)
 
     def _record_screw_reading(self, sc: Dict, z: float):
         sc["z"] = z
         if sc.get("is_base", False) or self._base_z is None:
             self._base_z = z
             sc["diff"] = 0.0
-            self.status_lbl.setText(f"Base screw reference recorded: Z = {z:.3f} mm.")
+            sc["turn"] = ""
+            self.status_lbl.setText(f"Center Reference recorded: Z = {z:.3f} mm.")
         else:
             diff = round(z - self._base_z, 4)
             sc["diff"] = diff
-            self.status_lbl.setText(f"Screw {sc['index']} measured: diff = {diff:+.3f} mm.")
+            sc["turn"] = self._calc_turn(diff)
+            self.status_lbl.setText(f"Screw {sc['index']} measured: diff = {diff:+.3f} mm ({sc['turn']}).")
 
         self.canvas.update()
         self._select_screw(sc["index"])
@@ -716,84 +952,52 @@ class BedScrewsScreen(QtWidgets.QFrame):
             return
 
         host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
-        start_t = time.time()
 
         def _done(ok):
             def _bg():
-                results = {}
-                try:
-                    url = f"http://{host}/server/gcode_store?count=60"
-                    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                    with urllib.request.urlopen(req, timeout=2.0) as resp:
-                        if resp.status == 200:
-                            data = json.loads(resp.read().decode("utf-8"))
-                            for item in data.get("result", {}).get("gcode_store", []):
-                                if float(item.get("time", 0.0)) < start_t - 2.0:
-                                    continue
-                                msg = item.get("message", "").strip()
-                                # E.g. front right screw : x=205.0, y=30.0, z=0.08500 : CW 00:04 (diff: 0.04500)
-                                m = re.search(
-                                    r"([\w\s]+)\s*:\s*x=([\d\.-]+),\s*y=([\d\.-]+),\s*z=([\d\.-]+)\s*:\s*(BASE|([A-Z]+)\s+([\d:]+))(?:\s*\(diff:\s*([\d\.-]+)\))?",
-                                    msg,
-                                    re.IGNORECASE,
-                                )
-                                if m:
-                                    name_part = m.group(1).strip().lower()
-                                    z_val = float(m.group(4))
-                                    base_or_turn = m.group(5).strip()
-                                    diff_val = float(m.group(8)) if m.group(8) else (0.0 if "BASE" in base_or_turn.upper() else 0.0)
-                                    results[name_part] = {
-                                        "z": z_val,
-                                        "diff": diff_val,
-                                        "turn": base_or_turn if "BASE" not in base_or_turn else "",
-                                        "is_base": "BASE" in base_or_turn.upper(),
-                                    }
-                except Exception:
-                    pass
+                # Allow a short moment for Moonraker gcode_store to write the output
+                time.sleep(0.5)
+                matched = self._fetch_tilt_results_from_store(host)
 
                 def _apply():
                     self._busy = False
                     self.btn_probe_all.setEnabled(True)
                     self.btn_probe_all.setText("⚡  Probe All Screws (Calculate)")
-                    for sc in self._screws:
-                        name_key = sc.get("name", "").lower()
-                        match = results.get(name_key)
-                        if not match:
-                            for k, v in results.items():
-                                if k in name_key or name_key in k:
-                                    match = v
-                                    break
-                        if match:
-                            sc["z"] = match["z"]
-                            sc["diff"] = match["diff"]
-                            sc["turn"] = match["turn"]
-                            if match["is_base"]:
-                                sc["is_base"] = True
-                                self._base_z = match["z"]
-
+                    if matched > 0:
+                        self.status_lbl.setText(f"All {matched} bed screws calculated! Follow the turn directions on screen.")
+                    else:
+                        self.status_lbl.setText("Probe calculation completed.")
                     self.canvas.update()
                     self._select_screw(self._selected_screw_idx)
-                    self.status_lbl.setText("All bed screws probed! Green screws are within acceptable tolerance.")
 
                 if hasattr(mr, "_dispatch_signal"):
                     mr._dispatch_signal.emit(_apply)
+                else:
+                    QtCore.QTimer.singleShot(0, _apply)
 
             threading.Thread(target=_bg, daemon=True).start()
 
-        mr.send_gcode("SCREWS_TILT_CALCULATE", on_done=_done, timeout=180.0)
+        mr.send_gcode("SCREWS_TILT_CALCULATE", on_done=_done, timeout=300.0)
 
     def _apply_sim_all(self):
         self._busy = False
         self.btn_probe_all.setEnabled(True)
         self.btn_probe_all.setText("⚡  Probe All Screws (Calculate)")
-        if len(self._screws) >= 4:
-            self._screws[0].update({"is_base": True, "z": 0.040, "diff": 0.0, "turn": ""})
-            self._screws[1].update({"is_base": False, "z": 0.065, "diff": 0.025, "turn": "CW 00:02"})
-            self._screws[2].update({"is_base": False, "z": -0.070, "diff": -0.110, "turn": "CCW 00:09"})
-            self._screws[3].update({"is_base": False, "z": 0.055, "diff": 0.015, "turn": "CW 00:01"})
+        self._base_z = 0.000
+        for sc in self._screws:
+            if sc.get("is_base", False):
+                sc["z"] = 0.000
+                sc["diff"] = 0.0
+                sc["turn"] = ""
+            else:
+                idx = sc["index"]
+                diff = [-0.015, 0.025, -0.060, 0.030, 0.120, -0.080, 0.010, -0.035, 0.055][(idx - 1) % 9]
+                sc["z"] = round(diff, 4)
+                sc["diff"] = diff
+                sc["turn"] = self._calc_turn(diff)
         self.canvas.update()
         self._select_screw(self._selected_screw_idx)
-        self.status_lbl.setText("Simulated: All screws probed. Green screws are level.")
+        self.status_lbl.setText("Simulated: All screws probed with Center Reference. Green screws are level.")
 
     def accept(self):
         self.closed.emit()
@@ -807,3 +1011,4 @@ class BedScrewsScreen(QtWidgets.QFrame):
         self.card.layout().setContentsMargins(m, m, m, m)
         self.icon_label.setPixmap(icons.pixmap("screws", _s(28, s)))
         self.icon_label.setFixedSize(_s(30, s), _s(30, s))
+
