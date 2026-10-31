@@ -416,6 +416,7 @@ class MainWindow(QtWidgets.QWidget):
     def close_sub_screen(self):
         """Close the active sub-screen and return to the previous main page."""
         target_page = getattr(self, "_sub_return_page", "home") or "home"
+        self._sub_return_page = "home"
         self._clear_sub_screen()
         self.show_page(target_page)
 
@@ -423,6 +424,16 @@ class MainWindow(QtWidgets.QWidget):
         if hasattr(self, "_active_sub_widget") and self._active_sub_widget:
             w = self._active_sub_widget
             self._active_sub_widget = None
+            if hasattr(w, "closed"):
+                try:
+                    w.closed.disconnect(self.close_sub_screen)
+                except Exception:
+                    pass
+            if hasattr(w, "_cleanup"):
+                try:
+                    w._cleanup()
+                except Exception:
+                    pass
             if hasattr(w, "close"):
                 try:
                     w.close()
@@ -430,10 +441,14 @@ class MainWindow(QtWidgets.QWidget):
                     pass
             self.sub_screen_layout.removeWidget(w)
             w.setParent(None)
+            w.deleteLater()
 
     def show_page(self, key: str):
         if hasattr(self, "_active_sub_widget") and self._active_sub_widget:
             self._clear_sub_screen()
+        elif key == getattr(self, "_current_page", ""):
+            # Already on the requested page and no sub-screen active; ignore redundant rapid clicks
+            return
         # If user taps Print in sidebar while actively printing, show the live print page
         if key == "files":
             mr = getattr(self, "moonraker", None)
