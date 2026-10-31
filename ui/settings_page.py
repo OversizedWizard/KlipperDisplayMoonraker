@@ -789,6 +789,22 @@ class SettingsPage(QtWidgets.QWidget):
             else:
                 view.show()
             return
+        if item.get("id") in ("screws_tilt", "bed_screws"):
+            from .bed_screws_page import BedScrewsScreen
+            view = BedScrewsScreen(scale=self._scale, parent=main_win)
+            if hasattr(main_win, "open_sub_screen"):
+                main_win.open_sub_screen(view, title="Bed Screws Adjust", return_page="settings")
+            else:
+                view.show()
+            return
+        if item.get("id") == "pid_tune":
+            from .pid_tune_page import PidTuneScreen
+            view = PidTuneScreen(scale=self._scale, parent=main_win)
+            if hasattr(main_win, "open_sub_screen"):
+                main_win.open_sub_screen(view, title="PID Heater Autotune", return_page="settings")
+            else:
+                view.show()
+            return
         if item.get("id") == "load_cell_weight_test":
             view = LoadCellWeightTestDialog(scale=self._scale, parent=main_win)
             if hasattr(main_win, "open_sub_screen"):

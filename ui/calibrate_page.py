@@ -96,15 +96,15 @@ CALIBRATION_DETAILS = {
     "screws_tilt": {
         "id": "screws_tilt",
         "icon": "screws",
-        "title": "Screws Tilt Calculate",
-        "cmd": "SCREWS_TILT_CALCULATE",
-        "desc": "Probe bed thumbscrew levels.",
-        "prereqs": "Printer has [screws_tilt_adjust] configured with screw coordinates.",
+        "title": "Bed Screws Adjust",
+        "cmd": "BED_SCREWS",
+        "desc": "Move to screw points & probe clearance.",
+        "prereqs": "Printer has [screws_tilt_adjust] or [bed_screws] configured.",
         "steps": [
-            "1. Homes axes and probes reference screw (usually Front-Left).",
-            "2. Probes points directly above all remaining bed screws.",
-            "3. Calculates clockwise (CW) / counter-clockwise (CCW) knob turns.",
-            "4. Example: 'CW 01:15' means rotate knob clockwise 1 hour 15 mins."
+            "1. Touch any screw on the bed grid to move toolhead there.",
+            "2. Tap 'Probe This Screw' to measure clearance with nozzle probe.",
+            "3. Follow raise / lower guidance until value turns green (≤ 0.04 mm).",
+            "4. Tap 'Probe All Screws' to calculate all points at once."
         ],
         "target_cmd": "SCREWS_TILT_CALCULATE"
     },
@@ -266,7 +266,6 @@ CALIBRATION_LIST = [
     CALIBRATION_DETAILS["z_tilt"],
     CALIBRATION_DETAILS["quad_gantry_level"],
     CALIBRATION_DETAILS["screws_tilt"],
-    CALIBRATION_DETAILS["bed_screws"],
     CALIBRATION_DETAILS["bed_mesh"],
     CALIBRATION_DETAILS["input_shaper"],
     CALIBRATION_DETAILS["pid_tune"],
@@ -320,17 +319,11 @@ def is_calibration_supported(item_id: str, config: dict = None, objects: list = 
             return True
         return "bed_mesh" in cfg or "bed_mesh" in objs
 
-    # Screws Tilt Adjust (screws_tilt_adjust)
-    if item_id == "screws_tilt":
+    # Bed Screws Adjust (screws_tilt_adjust or bed_screws)
+    if item_id in ("screws_tilt", "bed_screws"):
         if not cfg and not objs:
             return False
-        return "screws_tilt_adjust" in cfg or "screws_tilt_adjust" in objs
-
-    # Bed Screws Adjust (bed_screws)
-    if item_id == "bed_screws":
-        if not cfg and not objs:
-            return False
-        return "bed_screws" in cfg or "bed_screws" in objs
+        return "screws_tilt_adjust" in cfg or "screws_tilt_adjust" in objs or "bed_screws" in cfg or "bed_screws" in objs
 
     # Probe Calibrate / Accuracy / Z-Offset
     if item_id in ("probe_cal", "probe_acc", "z_offset"):
@@ -3322,6 +3315,22 @@ class CalibratePage(QtWidgets.QWidget):
             view = ZOffsetScreen(scale=self._scale, parent=main_win)
             if hasattr(main_win, "open_sub_screen"):
                 main_win.open_sub_screen(view, title="Z-Offset Calibration", return_page="calibrate")
+            else:
+                view.show()
+            return
+        if item.get("id") in ("screws_tilt", "bed_screws"):
+            from .bed_screws_page import BedScrewsScreen
+            view = BedScrewsScreen(scale=self._scale, parent=main_win)
+            if hasattr(main_win, "open_sub_screen"):
+                main_win.open_sub_screen(view, title="Bed Screws Adjust", return_page="calibrate")
+            else:
+                view.show()
+            return
+        if item.get("id") == "pid_tune":
+            from .pid_tune_page import PidTuneScreen
+            view = PidTuneScreen(scale=self._scale, parent=main_win)
+            if hasattr(main_win, "open_sub_screen"):
+                main_win.open_sub_screen(view, title="PID Heater Autotune", return_page="calibrate")
             else:
                 view.show()
             return
