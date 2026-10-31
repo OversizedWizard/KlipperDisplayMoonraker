@@ -331,6 +331,17 @@ class MoonrakerClient(QtCore.QObject):
             if self.last_print_stats:
                 self.last_print_stats["base_z_offset"] = self.base_z_offset
                 self.print_stats_updated.emit(self.last_print_stats)
+            # Ensure hotend fan speed matches start gcode temperature profile on firmware startup
+            has_fan_profile = any("SET_HOTEND_FAN_PROFILE" in str(k).upper() for k in list(cfg_found.keys()) + list(objs_found))
+            if has_fan_profile:
+                ref_temp = max(float(self.nozzle_target or 0.0), float(self.nozzle_temp or 0.0))
+                if ref_temp <= 210.0:
+                    f_spd = 0.45
+                elif ref_temp <= 250.0:
+                    f_spd = 0.50
+                else:
+                    f_spd = 0.70
+                self.send_gcode(f"SET_HEATER_FAN_SPEED FAN=hotend_fan SPEED={f_spd:.2f}")
             self.config_loaded.emit(self.config, self.objects)
             self.firmware_info_updated.emit(self.firmware_info)
 
@@ -610,14 +621,13 @@ class MoonrakerClient(QtCore.QObject):
         self.send_gcode(cmd, on_done=on_done, timeout=5.0)
 
     def cancel_print(self, on_done=None):
-        """Cancel active print immediately and set cooldown straight away.
-        If Klipper is blocked inside a synchronous start macro (M190/M109/Z_TILT_ADJUST)
-        and /printer/print/cancel does not return within 1.5s, immediately break out of
-        the blocking loop via /printer/emergency_stop + /printer/firmware_restart.
+        """Cancel active print cleanly via Moonraker /printer/print/cancel (CANCEL_PRINT macro).
+        Allows the toolhead to retract, raise Z (+10mm), and park at X10 Y200 (same as PRINT_END)
+        without resetting or restarting the firmware.
         """
         host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
 
-        def _post_json(ep: str, payload: dict, timeout: float = 2.0) -> bool:
+        def _post_json(ep: str, payload: dict, timeout: float = 30.0) -> bool:
             try:
                 url = f"http://{host}{ep}"
                 req = urllib.request.Request(
@@ -632,30 +642,13 @@ class MoonrakerClient(QtCore.QObject):
                 return False
 
         def _run():
-            # 1. Try standard Moonraker cancel with short 1.5s timeout
-            cancelled_ok = _post_json("/printer/print/cancel", {}, timeout=1.5)
+            # Execute standard Moonraker cancel (runs CANCEL_PRINT macro: raises Z+10 and parks at X10 Y200)
+            cancelled_ok = _post_json("/printer/print/cancel", {}, timeout=30.0)
+            if not cancelled_ok:
+                # Fallback to CANCEL_PRINT gcode macro directly without resetting firmware
+                _post_json("/printer/gcode/script", {"script": "CANCEL_PRINT"}, timeout=30.0)
 
-            if cancelled_ok:
-                # Standard cancel succeeded -> enforce immediate cooldown & reset SD state
-                cooldown_script = (
-                    "TURN_OFF_HEATERS\nM104 S0\nM140 S0\nM106 S0\n"
-                    "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0\n"
-                    "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0\n"
-                    "SDCARD_RESET_FILE\nCLEAR_PAUSE"
-                )
-                _post_json("/printer/gcode/script", {"script": cooldown_script}, timeout=2.0)
-            else:
-                # Klipper is blocked inside M190 / M109 / Z_TILT_ADJUST -> force break via emergency_stop + firmware_restart
-                _post_json("/printer/emergency_stop", {}, timeout=2.0)
-                time.sleep(0.6)
-                _post_json("/printer/firmware_restart", {}, timeout=3.0)
-                time.sleep(2.2)
-                cooldown_script = (
-                    "TURN_OFF_HEATERS\nM104 S0\nM140 S0\nM106 S0\n"
-                    "SDCARD_RESET_FILE\nCLEAR_PAUSE"
-                )
-                _post_json("/printer/gcode/script", {"script": cooldown_script}, timeout=2.0)
-
+            self.poll_now()
             if on_done:
                 self._dispatch_signal.emit(lambda: on_done(True))
 
