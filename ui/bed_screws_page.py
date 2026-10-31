@@ -884,17 +884,28 @@ class BedScrewsScreen(QtWidgets.QFrame):
         hop = int(getattr(self, "_hop_z", 10.0))
         clear_x, clear_y = self._get_clearance_pos(sc)
 
+        has_lc = False
+        if mr:
+            if hasattr(mr, "has_load_cell"):
+                has_lc = mr.has_load_cell()
+            if not has_lc and hasattr(mr, "objects"):
+                has_lc = any("load_cell" in str(o).lower() for o in mr.objects)
+
+        tare_step = "G4 P250\nLOAD_CELL_TARE\nG4 P100\n" if has_lc else ""
+
         if needs_ref:
-            self.status_lbl.setText(f"Getting Center Reference first ({base_sc['name']}), then probing Screw {sc['index']}...")
+            self.status_lbl.setText(f"Taring probe and measuring Center Reference first ({base_sc['name']}), then Screw {sc['index']}...")
             cmd = (
                 f"G90\n"
                 f"G1 Z{hop} F1200\n"
                 f"G1 X{base_sc['x']:.2f} Y{base_sc['y']:.2f} F{speed_f}\n"
+                f"{tare_step}"
                 f"PROBE\n"
                 f"G91\n"
                 f"G1 Z{hop} F1200\n"
                 f"G90\n"
                 f"G1 X{sc['x']:.2f} Y{sc['y']:.2f} F{speed_f}\n"
+                f"{tare_step}"
                 f"PROBE\n"
                 f"G91\n"
                 f"G1 Z{hop} F1200\n"
@@ -904,13 +915,14 @@ class BedScrewsScreen(QtWidgets.QFrame):
                 cmd += f"\nG1 X{clear_x:.2f} Y{clear_y:.2f} F{speed_f}"
         else:
             if sc.get("is_base", False):
-                self.status_lbl.setText(f"Probing Center Reference Screw ({sc['name']})...")
+                self.status_lbl.setText(f"Taring probe and measuring Center Reference Screw ({sc['name']})...")
             else:
-                self.status_lbl.setText(f"Probing Screw {sc['index']} ({sc['name']}) using locked Center Reference...")
+                self.status_lbl.setText(f"Taring probe and measuring Screw {sc['index']} ({sc['name']}) using locked Center Reference...")
             cmd = (
                 f"G90\n"
                 f"G1 Z{hop} F1200\n"
                 f"G1 X{sc['x']:.2f} Y{sc['y']:.2f} F{speed_f}\n"
+                f"{tare_step}"
                 f"PROBE\n"
                 f"G91\n"
                 f"G1 Z{hop} F1200\n"
@@ -1033,7 +1045,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
         self._busy = True
         self.btn_probe_all.setEnabled(False)
         self.btn_probe_all.setText("Measuring All Screws...")
-        self.status_lbl.setText("Executing SCREWS_TILT_CALCULATE to probe all screws automatically...")
+        self.status_lbl.setText("Taring probe before each screw and measuring bed...")
 
         if not (mr and mr.connected):
             # Simulation demo
@@ -1041,21 +1053,97 @@ class BedScrewsScreen(QtWidgets.QFrame):
             return
 
         host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
+        start_t = time.time()
+
+        has_lc = False
+        if mr:
+            if hasattr(mr, "has_load_cell"):
+                has_lc = mr.has_load_cell()
+            if not has_lc and hasattr(mr, "objects"):
+                has_lc = any("load_cell" in str(o).lower() for o in mr.objects)
+
+        speed_f = int(getattr(self, "_speed", 150.0) * 60)
+        hop = int(getattr(self, "_hop_z", 10.0))
+
+        base_sc = next((s for s in self._screws if s.get("is_base", False)), self._screws[0])
+        ordered_screws = [base_sc] + [s for s in self._screws if s["index"] != base_sc["index"]]
+
+        if has_lc:
+            tare_step = "G4 P250\nLOAD_CELL_TARE\nG4 P100\n"
+            cmd_lines = ["G90", f"G1 Z{hop} F1200"]
+            for s in ordered_screws:
+                cmd_lines.append(f"G90\nG1 X{s['x']:.2f} Y{s['y']:.2f} F{speed_f}")
+                cmd_lines.append(f"{tare_step}PROBE")
+                cmd_lines.append(f"G91\nG1 Z{hop} F1200\nG90")
+
+            if self._top_screws_enabled and ordered_screws:
+                last_sc = ordered_screws[-1]
+                clear_x, clear_y = self._get_clearance_pos(last_sc)
+                cmd_lines.append(f"G1 X{clear_x:.2f} Y{clear_y:.2f} F{speed_f}")
+
+            cmd = "\n".join(cmd_lines)
+            timeout_s = max(60.0, len(ordered_screws) * 15.0)
+        else:
+            cmd = "SCREWS_TILT_CALCULATE"
+            timeout_s = 300.0
 
         def _done(ok):
             def _bg():
-                # Allow a short moment for Moonraker gcode_store to write the output
                 time.sleep(0.5)
-                matched = self._fetch_tilt_results_from_store(host)
+                readings = []
+                try:
+                    url = f"http://{host}/server/gcode_store?count=100"
+                    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                    with urllib.request.urlopen(req, timeout=3.0) as resp:
+                        if resp.status == 200:
+                            data = json.loads(resp.read().decode("utf-8"))
+                            for item in data.get("result", {}).get("gcode_store", []):
+                                if float(item.get("time", 0.0)) < start_t - 1.0:
+                                    continue
+                                msg = item.get("message", "")
+                                m = re.search(r"(?:contact at|Result is)\s+z=\s*([\d\.-]+)", msg, re.IGNORECASE)
+                                if m:
+                                    readings.append(float(m.group(1)))
+                except Exception:
+                    pass
 
                 def _apply():
                     self._busy = False
                     self.btn_probe_all.setEnabled(True)
                     self.btn_probe_all.setText("⚡  Probe All Screws (Calculate)")
-                    if matched > 0:
-                        self.status_lbl.setText(f"All {matched} bed screws calculated! Follow the turn directions on screen.")
+                    if has_lc and len(readings) >= len(ordered_screws):
+                        ref_z = readings[0]
+                        self._base_z = ref_z
+                        base_sc["z"] = ref_z
+                        base_sc["diff"] = 0.0
+                        base_sc["turn"] = ""
+                        for idx, s in enumerate(ordered_screws[1:], start=1):
+                            s_z = readings[idx]
+                            s["z"] = s_z
+                            diff = round(s_z - ref_z, 4)
+                            s["diff"] = diff
+                            s["turn"] = self._calc_turn(diff)
+                        self.status_lbl.setText(f"All {len(ordered_screws)} screws tared & measured! Center Ref Z = {ref_z:.3f} mm.")
                     else:
-                        self.status_lbl.setText("Probe calculation completed.")
+                        matched = self._fetch_tilt_results_from_store(host)
+                        if matched > 0:
+                            self.status_lbl.setText(f"All {matched} bed screws calculated! Follow the turn directions on screen.")
+                        elif len(readings) > 0:
+                            ref_z = readings[0]
+                            self._base_z = ref_z
+                            base_sc["z"] = ref_z
+                            base_sc["diff"] = 0.0
+                            base_sc["turn"] = ""
+                            for idx, s in enumerate(ordered_screws[1:len(readings)], start=1):
+                                s_z = readings[idx]
+                                s["z"] = s_z
+                                diff = round(s_z - ref_z, 4)
+                                s["diff"] = diff
+                                s["turn"] = self._calc_turn(diff)
+                            self.status_lbl.setText(f"{len(readings)} screws measured with tare. Center Ref Z = {ref_z:.3f} mm.")
+                        else:
+                            self.status_lbl.setText("Probe calculation completed.")
+
                     self.canvas.update()
                     self._select_screw(self._selected_screw_idx)
 
@@ -1066,7 +1154,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
 
             threading.Thread(target=_bg, daemon=True).start()
 
-        mr.send_gcode("SCREWS_TILT_CALCULATE", on_done=_done, timeout=300.0)
+        mr.send_gcode(cmd, on_done=_done, timeout=timeout_s)
 
     def _apply_sim_all(self):
         self._busy = False
