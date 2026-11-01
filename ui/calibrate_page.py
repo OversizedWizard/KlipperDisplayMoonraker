@@ -258,12 +258,28 @@ CALIBRATION_DETAILS = {
         ],
         "target_cmd": "DELTA_CALIBRATE"
     },
+    "dual_z_trim": {
+        "id": "dual_z_trim",
+        "icon": "gantry",
+        "title": "Manual Dual Z Trim",
+        "cmd": "DUAL_Z_TRIM",
+        "desc": "Manual dual Z motor alignment.",
+        "prereqs": "Dual Z lead screws without independent drivers. Probe configured and bed clear.",
+        "steps": [
+            "1. Tap 'Check' to probe Left side as reference and Right side.",
+            "2. View height difference (ΔZ) and animated motor direction.",
+            "3. Turn Right Z motor manually (CW raises bed, CCW lowers bed).",
+            "4. Tap 'Probe' to re-test Right point until level."
+        ],
+        "target_cmd": "DUAL_Z_TRIM"
+    },
 }
 
 CALIBRATION_LIST = [
     CALIBRATION_DETAILS["probe_cal"],
     CALIBRATION_DETAILS["load_cell_cal"],
     CALIBRATION_DETAILS["z_tilt"],
+    CALIBRATION_DETAILS["dual_z_trim"],
     CALIBRATION_DETAILS["quad_gantry_level"],
     CALIBRATION_DETAILS["screws_tilt"],
     CALIBRATION_DETAILS["bed_mesh"],
@@ -301,6 +317,14 @@ def is_calibration_supported(item_id: str, config: dict = None, objects: list = 
         if not cfg and not objs:
             return False
         return "z_tilt" in cfg or "z_tilt" in objs
+
+    # Manual Dual Z Trim: Show when independent dual Z motors (z_tilt / quad_gantry_level) are NOT used
+    if item_id == "dual_z_trim":
+        if not cfg and not objs:
+            return True
+        has_auto_z = "z_tilt" in cfg or "z_tilt" in objs or "quad_gantry_level" in cfg or "quad_gantry_level" in objs
+        has_probe = any(k in cfg for k in ["probe", "bltouch", "smart_effector", "beacon", "load_cell_probe"]) or any("probe" in o for o in objs)
+        return (not has_auto_z) and has_probe and kinematics != "delta"
 
     if item_id == "qgl_ztilt":
         if not cfg and not objs:
@@ -3323,6 +3347,14 @@ class CalibratePage(QtWidgets.QWidget):
             view = BedScrewsScreen(scale=self._scale, parent=main_win)
             if hasattr(main_win, "open_sub_screen"):
                 main_win.open_sub_screen(view, title="Bed Screws Adjust", return_page="calibrate")
+            else:
+                view.show()
+            return
+        if item.get("id") == "dual_z_trim":
+            from .dual_z_trim_page import DualZTrimScreen
+            view = DualZTrimScreen(scale=self._scale, parent=main_win)
+            if hasattr(main_win, "open_sub_screen"):
+                main_win.open_sub_screen(view, title="Manual Dual Z Trim", return_page="calibrate")
             else:
                 view.show()
             return
