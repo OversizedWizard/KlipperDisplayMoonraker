@@ -75,6 +75,19 @@ QFrame#TopBar {{
     background: rgba(16, 22, 36, 200);
     border-bottom: 1px solid {c['border']};
 }}
+QPushButton#TopBackBtn {{
+    color: {c['cyan']};
+    background: rgba(0, 229, 255, 25);
+    border: 1px solid rgba(0, 229, 255, 95);
+    border-radius: {px(8)};
+    padding: {px(4)} {px(12)};
+    font-size: {px(13)};
+    font-weight: 800;
+}}
+QPushButton#TopBackBtn:hover, QPushButton#TopBackBtn:pressed {{
+    background: rgba(0, 229, 255, 55);
+    border-color: {c['cyan']};
+}}
 QLabel#PageTitle {{
     font-size: {px(18)};
     font-weight: 700;

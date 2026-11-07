@@ -98,6 +98,13 @@ class TopBar(QtWidgets.QFrame):
         self.setObjectName("TopBar")
         self._layout = QtWidgets.QHBoxLayout(self)
 
+        self.back_btn = QtWidgets.QPushButton("‹ Back")
+        self.back_btn.setObjectName("TopBackBtn")
+        self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.back_btn.setVisible(False)
+        self.back_btn.clicked.connect(self._on_back_click)
+        self._layout.addWidget(self.back_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
         titles = QtWidgets.QVBoxLayout()
         titles.setSpacing(0)
         self.title = QtWidgets.QLabel("Home")
@@ -138,6 +145,14 @@ class TopBar(QtWidgets.QFrame):
         self._timer.timeout.connect(self._tick)
         self._timer.start()
         self._tick()
+
+    def _on_back_click(self):
+        main_win = self.window()
+        if hasattr(main_win, "close_sub_screen"):
+            main_win.close_sub_screen()
+
+    def set_back_visible(self, visible: bool):
+        self.back_btn.setVisible(visible)
 
     def _on_estop_click(self):
         main_win = self.window()
@@ -407,6 +422,7 @@ class MainWindow(QtWidgets.QWidget):
 
         if title:
             self.topbar.set_title(title)
+        self.topbar.set_back_visible(True)
 
         if hasattr(widget, "apply_scale") and self._scale:
             widget.apply_scale(self._scale)
@@ -418,6 +434,8 @@ class MainWindow(QtWidgets.QWidget):
         target_page = getattr(self, "_sub_return_page", "home") or "home"
         self._sub_return_page = "home"
         self._clear_sub_screen()
+        self.topbar.set_back_visible(False)
+        self._current_page = None  # Reset so show_page won't skip!
         self.show_page(target_page)
 
     def _clear_sub_screen(self):
@@ -446,8 +464,9 @@ class MainWindow(QtWidgets.QWidget):
     def show_page(self, key: str):
         if hasattr(self, "_active_sub_widget") and self._active_sub_widget:
             self._clear_sub_screen()
-        elif key == getattr(self, "_current_page", ""):
-            # Already on the requested page and no sub-screen active; ignore redundant rapid clicks
+            self.topbar.set_back_visible(False)
+        elif key == getattr(self, "_current_page", "") and self.stack.currentWidget() == self.pages.get(key):
+            # Already on the requested page and showing it; ignore redundant rapid clicks
             return
         # If user taps Print in sidebar while actively printing, show the live print page
         if key == "files":
