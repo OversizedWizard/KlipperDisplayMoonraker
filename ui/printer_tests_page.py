@@ -422,7 +422,11 @@ class PrinterTestsScreen(QtWidgets.QFrame):
 
         def _on_res(data: dict):
             self._busy_poll = False
-            self._update_ui_from_status(data)
+            try:
+                if self.isVisible():
+                    self._update_ui_from_status(data)
+            except Exception:
+                pass
 
         mr.query_diagnostics_status(on_done=_on_res, query_hw_endstops=query_hw)
 
