@@ -82,6 +82,9 @@ class BedMeshCanvas(QtWidgets.QWidget):
         self._probed = set()
         self._order = []
         self._head = [0.0, 0.0]           # normalised 0..1 toolhead position
+        self._target_head = [0.0, 0.0]    # target normalized position from live telemetry
+        self._cur_z = 10.0
+        self._live_vel = 0.0
         self._live = False                # True when following real toolhead
         self._sim_idx = 0
         self._sim_t = 0.0
@@ -136,6 +139,9 @@ class BedMeshCanvas(QtWidgets.QWidget):
         self._sim_idx = 0
         self._sim_t = 0.0
         self._head = [0.0, 0.0]
+        self._target_head = [0.0, 0.0]
+        self._cur_z = 10.0
+        self._live_vel = 0.0
         self._count = self._cfg_count
         self._build_order()
         self._timer.start()
@@ -159,21 +165,37 @@ class BedMeshCanvas(QtWidgets.QWidget):
             self._build_order()
         self.update()
 
-    def set_toolhead(self, x: float, y: float):
-        """Feed live toolhead XY (mm) during probing."""
+    def set_toolhead(self, x: float, y: float, z: float = 10.0, vel: float = 0.0):
+        """Feed live toolhead coordinates (mm) during probing."""
         if self._mode != "probing":
             return
         x0, y0 = self._mesh_min
         x1, y1 = self._mesh_max
         nx = (x - x0) / max(1e-6, x1 - x0)
         ny = (y - y0) / max(1e-6, y1 - y0)
-        self._head = [max(-0.1, min(1.1, nx)), max(-0.1, min(1.1, ny))]
+        self._target_head = [max(-0.1, min(1.1, nx)), max(-0.1, min(1.1, ny))]
+        self._cur_z = z
+        self._live_vel = vel
+
+        # Check if the physical nozzle has reached any grid spot
         cx, cy = self._count
-        gx = round(self._head[0] * (cx - 1))
-        gy = round(self._head[1] * (cy - 1))
-        if abs(self._head[0] * (cx - 1) - gx) < 0.15 and abs(self._head[1] * (cy - 1) - gy) < 0.15:
-            if 0 <= gx < cx and 0 <= gy < cy and self._in_bed(gx, gy):
-                self._probed.add((gx, gy))
+        for (gx, gy) in self._order:
+            if (gx, gy) in self._probed:
+                continue
+            # Distance in normalized grid coordinates (0 = exact center of grid point)
+            grid_dx = self._target_head[0] * (cx - 1) - gx
+            grid_dy = self._target_head[1] * (cy - 1) - gy
+            dist_grid = math.hypot(grid_dx, grid_dy)
+
+            # Only when the physical nozzle has reached the spot (<= 0.16 pitch):
+            if dist_grid < 0.16:
+                # Wait for the nozzle to actually probe at this position:
+                # 1. Z drops down below horizontal move clearance (z <= 3.5mm; travel clearance is 5.0mm)
+                # 2. Or the toolhead dwells at low velocity on the spot (vel < 3.0 mm/s)
+                if z <= 3.5 or vel < 3.0:
+                    if self._in_bed(gx, gy):
+                        self._probed.add((gx, gy))
+                break
 
     def stats(self):
         flat = [v for r in self._matrix for v in r]
@@ -184,7 +206,12 @@ class BedMeshCanvas(QtWidgets.QWidget):
     # ----- animation -----
     def _step(self):
         self._phase = (self._phase + 0.06) % (math.pi * 2)
-        if not self._live and self._order:
+        if self._live:
+            # Smoothly glide toolhead crosshair towards latest physical position
+            if hasattr(self, '_target_head') and self._target_head:
+                self._head[0] += (self._target_head[0] - self._head[0]) * 0.4
+                self._head[1] += (self._target_head[1] - self._head[1]) * 0.4
+        elif self._order:
             cx, cy = self._count
             self._sim_t += 0.045
             cur = self._order[self._sim_idx % len(self._order)]
@@ -570,7 +597,7 @@ class BedMeshScreen(QtWidgets.QFrame):
         lay.addLayout(bot)
 
         self._pos_timer = QtCore.QTimer(self)
-        self._pos_timer.setInterval(200)
+        self._pos_timer.setInterval(80)
         self._pos_timer.timeout.connect(self._poll_toolhead)
 
         self.apply_scale(scale)
@@ -874,16 +901,30 @@ class BedMeshScreen(QtWidgets.QFrame):
         mr = self._get_moonraker()
         if not (mr and mr.connected):
             return
+        if getattr(self, "_poll_active", False):
+            return
+        self._poll_active = True
         host = self._host(mr)
 
         def _bg():
             try:
-                url = f"http://{host}/printer/objects/query?toolhead=position"
-                with urllib.request.urlopen(urllib.request.Request(url), timeout=0.8) as resp:
-                    pos = json.loads(resp.read().decode("utf-8"))["result"]["status"]["toolhead"]["position"]
-                    self._ui(mr, lambda: self.canvas.set_toolhead(float(pos[0]), float(pos[1])))
+                url = f"http://{host}/printer/objects/query?motion_report&toolhead=position"
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=0.6) as resp:
+                    data = json.loads(resp.read().decode("utf-8")).get("result", {}).get("status", {})
+                    mr_st = data.get("motion_report", {})
+                    live_pos = mr_st.get("live_position")
+                    live_vel = float(mr_st.get("live_velocity", 0.0))
+                    th_pos = data.get("toolhead", {}).get("position")
+                    pos = live_pos if (live_pos and len(live_pos) >= 3) else th_pos
+                    if pos and len(pos) >= 2:
+                        x, y = float(pos[0]), float(pos[1])
+                        z = float(pos[2]) if len(pos) > 2 else 10.0
+                        self._ui(mr, lambda: self.canvas.set_toolhead(x, y, z, live_vel))
             except Exception:
                 pass
+            finally:
+                self._poll_active = False
 
         threading.Thread(target=_bg, daemon=True).start()
 
