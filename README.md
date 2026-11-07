@@ -6,6 +6,32 @@ Designed from the ground up for responsive touchscreens (7-inch, 5-inch, 4.3-inc
 
 ---
 
+## 📸 Touchscreen Interface & Screenshots
+
+Captured directly from a Raspberry Pi running the 800×480 touchscreen interface:
+
+| **Main Dashboard & Live Telemetry** | **Live Bed Mesh Calibration** |
+|:---:|:---:|
+| ![Main Dashboard](assets/screenshots/01_dashboard.png) | ![Bed Mesh Calibration](assets/screenshots/02_bed_mesh.png) |
+| *Live nozzle/bed temperatures, real-time load cell force readout, XY jog controls & printer status* | *Visual bed heightmap, real-time probe point tracking & toolhead sync* |
+
+| **Manual Dual Z Motor Trim** | **Bed Screws Adjustment** |
+|:---:|:---:|
+| ![Manual Dual Z Motor Trim](assets/screenshots/03_dual_z_trim.png) | ![Bed Screws Adjustment](assets/screenshots/04_bed_screws.png) |
+| *Independent leadscrew alignment with live tilt angle and CW/CCW turn guides* | *Guided bed leveling with screw corner directions and live probe measurements* |
+
+| **Interactive Calibration Hub** | **Spool & Filament Manager** |
+|:---:|:---:|
+| ![Calibration Hub](assets/screenshots/05_calibrate_hub.png) | ![Spool Manager](assets/screenshots/06_spool_manager.png) |
+| *Unified hub for Z-offset, load cell tare, mesh, shaper, screws, and PID autotune* | *One-touch load/unload workflows, material presets & animated extrusion gears* |
+
+| **G-Code File Browser** | **System & Display Settings** |
+|:---:|:---:|
+| ![G-Code Files](assets/screenshots/07_files_print.png) | ![Settings](assets/screenshots/08_settings.png) |
+| *Print file browser with metadata, estimated time, and thumbnail previews* | *Host system telemetry, network status, display options, and service controls* |
+
+---
+
 ## ✨ Features
 
 - **🎯 Z-Offset & Paper Friction Calibration**:
