@@ -89,6 +89,16 @@ class BedMeshCanvas(QtWidgets.QWidget):
         self._sim_idx = 0
         self._sim_t = 0.0
         self._phase = 0.0
+        self._view = "plate"              # "plate" | "surface" | "2d"
+        self._rot_x = 0.58                # pitch (rad)
+        self._rot_y = -0.68               # yaw (rad)
+        self._zoom = 1.0
+        self._dragging = False
+        self._drag_moved = False
+        self._last_pos = QtCore.QPointF(0.0, 0.0)
+        self._selected_spot = None        # dict of tapped/hovered spot
+        self._spots_2d = []               # projected spots for hit-testing
+        self.setMouseTracking(True)
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(25)       # 40 FPS
         self._timer.timeout.connect(self._step)
@@ -250,12 +260,112 @@ class BedMeshCanvas(QtWidgets.QWidget):
             rw, rh = w, w / aspect
         return QtCore.QRectF((self.width() - rw) / 2, m, rw, rh)
 
+    # ----- 3D view & finger/mouse controls -----
+    def cycle_view(self) -> str:
+        order = ("plate", "surface", "2d")
+        idx = (order.index(self._view) + 1) % len(order) if self._view in order else 0
+        self._view = order[idx]
+        self._selected_spot = None
+        self.update()
+        return self._view
+
+    def reset_view(self):
+        self._rot_x = 0.58
+        self._rot_y = -0.68
+        self._zoom = 1.0
+        self._selected_spot = None
+        self.update()
+
+    def _project_3d(self, X: float, Y: float, Z: float, cx: float, cy: float, scale: float):
+        cos_y, sin_y = math.cos(self._rot_y), math.sin(self._rot_y)
+        x1 = X * cos_y - Y * sin_y
+        y1 = X * sin_y + Y * cos_y
+        z1 = Z
+        cos_x, sin_x = math.cos(self._rot_x), math.sin(self._rot_x)
+        x2 = x1
+        y2 = y1 * cos_x - z1 * sin_x
+        z2 = y1 * sin_x + z1 * cos_x
+        s = scale * self._zoom
+        return cx + x2 * s, cy + y2 * s, z2
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position() if hasattr(event, "position") else QtCore.QPointF(event.pos())
+            self._dragging = True
+            self._drag_moved = False
+            self._last_pos = pos
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        pos = event.position() if hasattr(event, "position") else QtCore.QPointF(event.pos())
+        if self._dragging:
+            dx = pos.x() - self._last_pos.x()
+            dy = pos.y() - self._last_pos.y()
+            if abs(dx) > 2 or abs(dy) > 2:
+                self._drag_moved = True
+            if self._mode == "result" and self._view in ("plate", "surface"):
+                self._rot_y += dx * 0.0085
+                self._rot_x = max(0.15, min(1.42, self._rot_x + dy * 0.0085))
+                self._last_pos = pos
+                self.update()
+            event.accept()
+            return
+        # Hover spot highlight when moving mouse without dragging
+        if self._mode == "result" and self._spots_2d:
+            hit = None
+            for pt in self._spots_2d:
+                if math.hypot(pt["sx"] - pos.x(), pt["sy"] - pos.y()) < 16:
+                    hit = pt
+                    break
+            if hit != self._selected_spot:
+                self._selected_spot = hit
+                self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position() if hasattr(event, "position") else QtCore.QPointF(event.pos())
+            if not self._drag_moved and self._mode == "result" and self._spots_2d:
+                hit = None
+                for pt in self._spots_2d:
+                    if math.hypot(pt["sx"] - pos.x(), pt["sy"] - pos.y()) < 20:
+                        hit = pt
+                        break
+                self._selected_spot = hit
+                self.update()
+            self._dragging = False
+            event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        if self._mode == "result":
+            self.reset_view()
+            event.accept()
+
+    def wheelEvent(self, event):
+        if self._mode == "result" and self._view in ("plate", "surface"):
+            delta = event.angleDelta().y()
+            self._zoom = max(0.65, min(1.85, self._zoom + (delta / 120.0) * 0.08))
+            self.update()
+            event.accept()
+
     def paintEvent(self, event):
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         r = self._bed_rect()
 
-        # Bed plate
+        if self._mode == "result" and self._view in ("plate", "surface"):
+            # Dark 3D viewport background card
+            full_r = QtCore.QRectF(4, 4, self.width() - 8, self.height() - 8)
+            grad = QtGui.QLinearGradient(full_r.topLeft(), full_r.bottomRight())
+            grad.setColorAt(0, QtGui.QColor(21, 29, 42, 240))
+            grad.setColorAt(1, QtGui.QColor(11, 15, 25, 240))
+            p.setBrush(QtGui.QBrush(grad))
+            p.setPen(QtGui.QPen(QtGui.QColor(0, 229, 255, 95), 1.3))
+            p.drawRoundedRect(full_r, 10, 10)
+            self._paint_result_3d(p)
+            p.end()
+            return
+
+        # 2D Bed plate
         grad = QtGui.QLinearGradient(r.topLeft(), r.bottomRight())
         grad.setColorAt(0, QtGui.QColor(30, 41, 59, 230))
         grad.setColorAt(1, QtGui.QColor(15, 23, 42, 230))
@@ -264,7 +374,7 @@ class BedMeshCanvas(QtWidgets.QWidget):
         p.drawRoundedRect(r.adjusted(-10, -10, 10, 10), 10, 10)
 
         if self._mode == "result":
-            self._paint_result(p, r)
+            self._paint_result_2d(p, r)
         elif self._mode == "probing":
             self._paint_probing(p, r)
         else:
@@ -365,7 +475,7 @@ class BedMeshCanvas(QtWidgets.QWidget):
         p.drawText(QtCore.QRectF(0, self.height() - 22, self.width(), 20), Qt.AlignmentFlag.AlignCenter,
                    f"PROBING  {done}/{total} points  \u2022  {cx} \u00D7 {cy}")
 
-    def _paint_result(self, p, r):
+    def _paint_result_2d(self, p, r):
         st = self.stats()
         lo, hi = st if st else (0.0, 0.0)
         span = max(abs(lo), abs(hi), 0.01)
@@ -421,6 +531,264 @@ class BedMeshCanvas(QtWidgets.QWidget):
         p.drawText(QtCore.QRectF(lg.right() - 80, lg.top() - 14, 80, 12), Qt.AlignmentFlag.AlignRight, f"{span:+.3f}")
         p.drawText(QtCore.QRectF(r.left(), r.top() - 16, r.width(), 12), Qt.AlignmentFlag.AlignCenter, "REAR")
 
+    def _paint_result_3d(self, p: QtGui.QPainter):
+        if not self._matrix or not self._matrix[0]:
+            return
+        w, h = float(self.width()), float(self.height())
+        ny = len(self._matrix)
+        nx = len(self._matrix[0])
+        st = self.stats()
+        lo, hi = st if st else (0.0, 0.0)
+        span = max(abs(lo), abs(hi), 0.02)
+
+        cx = w * 0.5
+        cy = h * 0.5 - 4.0
+        scale = min(w, h) * 0.36
+
+        # 1. Draw 3D Build Plate Slab (Base & Thickness)
+        # In 3D coordinates: +Y is towards front of screen, +Z is up
+        P = [
+            (-1.08,  1.08, 0.0),   # Front-Left
+            ( 1.08,  1.08, 0.0),   # Front-Right
+            ( 1.08, -1.08, 0.0),   # Back-Right
+            (-1.08, -1.08, 0.0),   # Back-Left
+        ]
+        B = [
+            (-1.08,  1.08, -0.11),
+            ( 1.08,  1.08, -0.11),
+            ( 1.08, -1.08, -0.11),
+            (-1.08, -1.08, -0.11),
+        ]
+        p2d = [self._project_3d(pt[0], pt[1], pt[2], cx, cy, scale) for pt in P]
+        b2d = [self._project_3d(pt[0], pt[1], pt[2], cx, cy, scale) for pt in B]
+
+        sides = [
+            ([p2d[0], p2d[1], b2d[1], b2d[0]], QtGui.QColor("#1E293B")),  # Front
+            ([p2d[1], p2d[2], b2d[2], b2d[1]], QtGui.QColor("#0F172A")),  # Right
+            ([p2d[2], p2d[3], b2d[3], b2d[2]], QtGui.QColor("#090D16")),  # Back
+            ([p2d[3], p2d[0], b2d[0], b2d[3]], QtGui.QColor("#273549")),  # Left
+        ]
+        # Sort slab sides back-to-front by average depth
+        sides_sorted = sorted(sides, key=lambda item: sum(pt[2] for pt in item[0]) / 4.0)
+        for pts, col in sides_sorted:
+            poly = QtGui.QPolygonF([QtCore.QPointF(pt[0], pt[1]) for pt in pts])
+            p.setBrush(col)
+            p.setPen(QtGui.QPen(QtGui.QColor(56, 189, 248, 55), 1.0))
+            p.drawPolygon(poly)
+
+        # Top Build Plate Face
+        top_poly = QtGui.QPolygonF([QtCore.QPointF(pt[0], pt[1]) for pt in p2d])
+        plate_grad = QtGui.QLinearGradient(
+            QtCore.QPointF(p2d[3][0], p2d[3][1]),
+            QtCore.QPointF(p2d[1][0], p2d[1][1]),
+        )
+        plate_grad.setColorAt(0.0, QtGui.QColor("#151D2A"))
+        plate_grad.setColorAt(1.0, QtGui.QColor("#0C121D"))
+        p.setBrush(QtGui.QBrush(plate_grad))
+        p.setPen(QtGui.QPen(QtGui.QColor(0, 229, 255, 115), 1.5))
+        p.drawPolygon(top_poly)
+
+        # Subdued Plate Grid Lines
+        p.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 16), 1.0))
+        for k in range(-4, 5, 2):
+            u = k * 0.22
+            l1 = self._project_3d(u, -1.08, 0.0, cx, cy, scale)
+            l2 = self._project_3d(u,  1.08, 0.0, cx, cy, scale)
+            p.drawLine(QtCore.QPointF(l1[0], l1[1]), QtCore.QPointF(l2[0], l2[1]))
+            w1 = self._project_3d(-1.08, u, 0.0, cx, cy, scale)
+            w2 = self._project_3d( 1.08, u, 0.0, cx, cy, scale)
+            p.drawLine(QtCore.QPointF(w1[0], w1[1]), QtCore.QPointF(w2[0], w2[1]))
+
+        # Front edge label (at Y = +1.08, closest to viewer)
+        f_mid = self._project_3d(0.0, 1.18, -0.05, cx, cy, scale)
+        f = p.font()
+        f.setPointSizeF(8.0)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QtGui.QColor("#94A3B8"))
+        p.drawText(
+            QtCore.QRectF(f_mid[0] - 48, f_mid[1] - 4, 96, 16),
+            Qt.AlignmentFlag.AlignCenter,
+            "▲ FRONT",
+        )
+
+        # 2. Project 3D Probed Height Points (j=0 is front of bed -> +v)
+        spots = []
+        grid_3d = [[None] * nx for _ in range(ny)]
+        for j in range(ny):
+            for i in range(nx):
+                try:
+                    val = float(self._matrix[j][i])
+                except Exception:
+                    val = 0.0
+                u = (i / max(1, nx - 1) - 0.5) * 1.8
+                v = (0.5 - j / max(1, ny - 1)) * 1.8
+                z = max(-0.65, min(0.65, (val / span) * 0.45))
+
+                bx, by, _ = self._project_3d(u, v, 0.0, cx, cy, scale)
+                sx, sy, depth = self._project_3d(u, v, z, cx, cy, scale)
+                pt = {
+                    "i": i,
+                    "j": j,
+                    "val": val,
+                    "bx": bx,
+                    "by": by,
+                    "sx": sx,
+                    "sy": sy,
+                    "depth": depth,
+                    "is_min": abs(val - lo) < 1e-9,
+                    "is_max": abs(val - hi) < 1e-9,
+                }
+                grid_3d[j][i] = pt
+                if self._in_bed(i, j):
+                    spots.append(pt)
+        self._spots_2d = spots
+
+        # 3. Draw Topographic Contoured Surface Mesh (sorted back-to-front: smallest depth first)
+        quads = []
+        for j in range(ny - 1):
+            for i in range(nx - 1):
+                if not (self._in_bed(i, j) and self._in_bed(i + 1, j) and self._in_bed(i + 1, j + 1) and self._in_bed(i, j + 1)):
+                    continue
+                p00 = grid_3d[j][i]
+                p10 = grid_3d[j][i + 1]
+                p11 = grid_3d[j + 1][i + 1]
+                p01 = grid_3d[j + 1][i]
+                avg_val = (p00["val"] + p10["val"] + p11["val"] + p01["val"]) * 0.25
+                avg_depth = (p00["depth"] + p10["depth"] + p11["depth"] + p01["depth"]) * 0.25
+                quads.append((avg_depth, avg_val, (p00, p10, p11, p01)))
+        quads.sort(key=lambda q: q[0])
+
+        surf_only = (self._view == "surface")
+        for _depth, avg_val, (p00, p10, p11, p01) in quads:
+            base_col = mesh_color(avg_val, span)
+            fill_col = QtGui.QColor(base_col)
+            fill_col.setAlpha(120 if surf_only else 58)
+            line_col = QtGui.QColor(base_col)
+            line_col.setAlpha(205 if surf_only else 115)
+            p.setBrush(fill_col)
+            p.setPen(QtGui.QPen(line_col, 1.1))
+            poly = QtGui.QPolygonF([
+                QtCore.QPointF(p00["sx"], p00["sy"]),
+                QtCore.QPointF(p10["sx"], p10["sy"]),
+                QtCore.QPointF(p11["sx"], p11["sy"]),
+                QtCore.QPointF(p01["sx"], p01["sy"]),
+            ])
+            p.drawPolygon(poly)
+
+        # 4. Draw Coloured Spots (Discs / Nodes) with Height Stems (sorted back-to-front)
+        if self._view == "plate":
+            sorted_spots = sorted(spots, key=lambda pt: pt["depth"])
+            badges_to_draw = []
+            min_queued = False
+            max_queued = False
+            for pt in sorted_spots:
+                is_sel = (
+                    self._selected_spot is not None
+                    and self._selected_spot.get("i") == pt["i"]
+                    and self._selected_spot.get("j") == pt["j"]
+                )
+                rad = 9.0 if is_sel else 6.5
+                c_main = mesh_color(pt["val"], span)
+
+                # Anchor base dot on plate
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QtGui.QColor(255, 255, 255, 70))
+                p.drawEllipse(QtCore.QPointF(pt["bx"], pt["by"]), 2.0, 2.0)
+
+                # Vertical stem connecting build plate to elevated spot
+                stem_col = QtGui.QColor(c_main)
+                stem_col.setAlpha(240 if is_sel else 175)
+                p.setPen(QtGui.QPen(stem_col, 2.4 if is_sel else 1.8))
+                p.drawLine(QtCore.QPointF(pt["bx"], pt["by"]), QtCore.QPointF(pt["sx"], pt["sy"]))
+
+                # Coloured Spot with 3D Radial Highlight
+                s_grad = QtGui.QRadialGradient(
+                    QtCore.QPointF(pt["sx"] - 2.0, pt["sy"] - 2.0),
+                    rad * 1.15,
+                )
+                s_grad.setColorAt(0.0, QtGui.QColor("#FFFFFF"))
+                s_grad.setColorAt(0.38, c_main)
+                s_grad.setColorAt(1.0, c_main.darker(165))
+                p.setBrush(QtGui.QBrush(s_grad))
+                p.setPen(QtGui.QPen(QtGui.QColor("#FFFFFF") if is_sel else QtGui.QColor(255, 255, 255, 190), 2.2 if is_sel else 1.2))
+                p.drawEllipse(QtCore.QPointF(pt["sx"], pt["sy"]), rad, rad)
+
+                if not is_sel:
+                    if pt["is_max"] and not max_queued:
+                        max_queued = True
+                        badges_to_draw.append((pt, True))
+                    elif pt["is_min"] and not min_queued:
+                        min_queued = True
+                        badges_to_draw.append((pt, False))
+
+            # Draw Min / Max Callout Badges on top of spots so they are never occluded
+            for pt, is_max in badges_to_draw:
+                txt = f"{pt['val']:+.3f}"
+                f.setPointSizeF(7.5)
+                f.setBold(True)
+                p.setFont(f)
+                tw = 44.0
+                th = 15.0
+                by = (pt["sy"] + 16.0 if pt["sy"] < 42.0 else pt["sy"] - 17.0) if is_max else (pt["sy"] - 17.0 if pt["sy"] > h - 48.0 else pt["sy"] + 16.0)
+                badge_r = QtCore.QRectF(pt["sx"] - tw * 0.5, by - th * 0.5, tw, th)
+                p.setBrush(QtGui.QColor(239, 68, 68, 235) if is_max else QtGui.QColor(37, 99, 235, 235))
+                p.setPen(QtGui.QPen(QtGui.QColor("#FFFFFF"), 1.0))
+                p.drawRoundedRect(badge_r, 3.5, 3.5)
+                p.setPen(QtGui.QColor("#FFFFFF"))
+                p.drawText(badge_r, Qt.AlignmentFlag.AlignCenter, txt)
+
+        # 5. Selected / Tapped Spot Callout Tooltip
+        if self._selected_spot is not None:
+            hp = self._selected_spot
+            info = f"[{hp['i']}, {hp['j']}]  Z: {hp['val']:+.3f} mm"
+            f.setPointSizeF(8.5)
+            f.setBold(True)
+            p.setFont(f)
+            tw = 132.0
+            th = 22.0
+            hx = max(10.0, min(w - tw - 10.0, hp["sx"] - tw * 0.5))
+            hy = max(26.0, hp["sy"] - 32.0)
+            tip_r = QtCore.QRectF(hx, hy, tw, th)
+            p.setBrush(QtGui.QColor(15, 23, 42, 245))
+            p.setPen(QtGui.QPen(mesh_color(hp["val"], span), 1.8))
+            p.drawRoundedRect(tip_r, 5.0, 5.0)
+            p.setPen(QtGui.QColor("#F8FAFC"))
+            p.drawText(tip_r, Qt.AlignmentFlag.AlignCenter, info)
+
+        # 6. Top HUD Overlays
+        f.setPointSizeF(7.8)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QtGui.QColor("#CBD5E1"))
+        p.drawText(QtCore.QRectF(12, 8, w * 0.62, 16), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                   "3D PLATE • DRAG TO ROTATE")
+        p.setPen(QtGui.QColor("#38BDF8"))
+        mode_lbl = "3D PLATE + SPOTS" if self._view == "plate" else "3D TOPOGRAPHY"
+        p.drawText(QtCore.QRectF(w * 0.55, 8, w * 0.45 - 12, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                   mode_lbl)
+
+        # 7. Bottom Color Scale Legend
+        bar_w = min(220.0, w - 130.0)
+        bar_h = 7.0
+        bar_x = (w - bar_w) * 0.5
+        bar_y = h - 18.0
+        lg = QtCore.QRectF(bar_x, bar_y, bar_w, bar_h)
+        g = QtGui.QLinearGradient(lg.topLeft(), lg.topRight())
+        g.setColorAt(0.0, C_LOW)
+        g.setColorAt(0.5, C_MID)
+        g.setColorAt(0.75, C_HIGH1)
+        g.setColorAt(1.0, C_HIGH2)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QtGui.QBrush(g))
+        p.drawRoundedRect(lg, 3.5, 3.5)
+
+        f.setPointSizeF(7.5)
+        p.setFont(f)
+        p.setPen(QtGui.QColor("#60A5FA"))
+        p.drawText(QtCore.QRectF(bar_x - 54, bar_y - 3, 50, 14), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"{-span:+.2f}")
+        p.setPen(QtGui.QColor("#F87171"))
+        p.drawText(QtCore.QRectF(bar_x + bar_w + 4, bar_y - 3, 50, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{span:+.2f}")
 
 _BTN_PRIMARY = """
 QPushButton { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284C7, stop:1 #00E5FF);
@@ -461,7 +829,14 @@ class BedMeshScreen(QtWidgets.QFrame):
         self._active_profile = ""
         self._busy = False
         self._confirm_action = None   # ("save"|"delete", name)
-        self._sim_matrix = None
+        self._sim_matrix = [
+            [-0.045, -0.025, -0.010, -0.012, -0.030, -0.055],
+            [-0.020,  0.015,  0.035,  0.030,  0.010, -0.025],
+            [ 0.010,  0.045,  0.075,  0.068,  0.038,  0.005],
+            [ 0.015,  0.050,  0.082,  0.072,  0.042,  0.010],
+            [-0.015,  0.020,  0.040,  0.035,  0.015, -0.020],
+            [-0.050, -0.030, -0.015, -0.018, -0.035, -0.060],
+        ]
 
         self.setObjectName("BedMeshScreen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -487,6 +862,16 @@ class BedMeshScreen(QtWidgets.QFrame):
         self.title_lbl = QtWidgets.QLabel("BED MESH")
         self.title_lbl.setStyleSheet("color: #FFFFFF; font-size: 15px; font-weight: 800; letter-spacing: 0.5px;")
         hdr.addWidget(self.title_lbl, 1)
+        self.view_btn = QtWidgets.QPushButton("👁 3D Plate")
+        self.view_btn.setStyleSheet(_BTN_GHOST)
+        self.view_btn.clicked.connect(self._on_cycle_view)
+        hdr.addWidget(self.view_btn)
+
+        self.reset_3d_btn = QtWidgets.QPushButton("⟲ Reset 3D")
+        self.reset_3d_btn.setStyleSheet(_BTN_GHOST)
+        self.reset_3d_btn.clicked.connect(self._on_reset_3d)
+        hdr.addWidget(self.reset_3d_btn)
+
         self.active_badge = QtWidgets.QLabel("NO MESH ACTIVE")
         self.active_badge.setStyleSheet(
             "color: #94A3B8; font-size: 10px; font-weight: 800; background: rgba(148,163,184,0.12);"
@@ -689,6 +1074,15 @@ class BedMeshScreen(QtWidgets.QFrame):
             self._profiles.setdefault("default", {"points": self._sim_matrix})
         self._active_profile = bm.get("profile_name", "") or ""
         matrix = bm.get("probed_matrix") or []
+        if not (matrix and matrix[0]) and self._profiles:
+             fallback_prof = self._active_profile if self._active_profile in self._profiles else (
+                 "default" if "default" in self._profiles else next(iter(self._profiles))
+             )
+             pts = (self._profiles.get(fallback_prof) or {}).get("points")
+             if pts and pts[0]:
+                 matrix = [list(r) for r in pts]
+                 if not self._active_profile:
+                     self._active_profile = fallback_prof
         has_mesh = bool(matrix and matrix[0])
         if has_mesh:
             self.canvas.show_matrix(matrix)
@@ -763,6 +1157,19 @@ class BedMeshScreen(QtWidgets.QFrame):
             self.prof_layout.insertWidget(i, roww)
 
     # ------------------------------------------------------------------ actions
+    def _on_cycle_view(self):
+        v = self.canvas.cycle_view()
+        labels = {
+            "plate": "👁 3D Plate",
+            "surface": "👁 3D Topo",
+            "2d": "👁 2D Grid",
+        }
+        self.view_btn.setText(labels.get(v, "👁 3D Plate"))
+        self.reset_3d_btn.setVisible(v in ("plate", "surface"))
+
+    def _on_reset_3d(self):
+        self.canvas.reset_view()
+
     def _armed(self, action, name, prompt):
         """Two-tap confirmation for actions that run SAVE_CONFIG (restarts Klipper)."""
         if self._confirm_action == (action, name):

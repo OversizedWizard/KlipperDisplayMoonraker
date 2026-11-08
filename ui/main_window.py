@@ -359,22 +359,30 @@ class MainWindow(QtWidgets.QWidget):
 
     def _on_print_stats_updated(self, st: dict):
         state = st.get("state", "standby")
-        prev_state = getattr(self, "_last_raw_print_state", "standby")
+        prev_state = getattr(self, "_last_raw_print_state", None)
         self._last_raw_print_state = state
+        filename = st.get("filename", "") or ""
+        prev_file = getattr(self, "_last_raw_print_file", None)
+        self._last_raw_print_file = filename
 
         if "printing" in self.pages:
             pp = self.pages["printing"]
-            if state == "printing" and prev_state != "printing":
+            if state == "printing" and (prev_state != "printing" or filename != prev_file):
                 pp._print_state = "printing"
             pp.update_print_stats(st)
 
         if hasattr(self.sidebar, "set_print_state"):
             self.sidebar.set_print_state(state)
 
-        # If print started while on files page, switch to printing screen
-        if state == "printing" and getattr(self, "_current_page", "") == "files":
+        # Automatically switch to printing screen when a print starts (locally or remotely from Orca/Mainsail)
+        just_started = (
+            state in ("printing", "paused")
+            and (prev_state not in ("printing", "paused") or (filename and filename != prev_file))
+        )
+        if just_started or (state == "printing" and getattr(self, "_current_page", "") == "files"):
             if getattr(self.pages.get("printing"), "_print_state", "") != "cancelled":
-                self.show_page("printing")
+                if getattr(self, "_current_page", "") != "printing":
+                    self.show_page("printing")
         # If print has cancelled while on printing page, set cooldown and return to home page
         elif state in ("cancelled", "cancelling") and getattr(self, "_current_page", "") == "printing":
             if hasattr(self, "moonraker") and self.moonraker:
