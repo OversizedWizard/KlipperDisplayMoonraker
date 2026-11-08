@@ -459,3 +459,182 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
     def mousePressEvent(self, event):
         event.accept()
+
+
+class TempTuneOverlay(QtWidgets.QFrame):
+    """Touch overlay to fine tune a heater target (nozzle or bed) with big +/- buttons."""
+    closed = Signal()
+
+    def __init__(self, heater: str, parent=None, scale: float = 1.0):
+        super().__init__(parent)
+        self.scale = scale
+        self.heater = heater  # "extruder" or "heater_bed"
+        self._is_nozzle = heater == "extruder"
+        self._accent = "#FF9A3C" if self._is_nozzle else "#00E5FF"
+        self._max_t = 300 if self._is_nozzle else 120
+        self._steps = [1, 5, 10]
+        self._step = 5
+        self.setObjectName("TempTuneOverlay")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("QFrame#TempTuneOverlay { background: rgba(5, 10, 20, 0.88); }")
+        if parent:
+            self.setGeometry(parent.rect())
+
+        self._mr = getattr(self.window(), "moonraker", None)
+        self._cur = 0.0
+        self._tgt = 0.0
+        if self._mr:
+            self._cur = float(getattr(self._mr, "nozzle_temp" if self._is_nozzle else "bed_temp", 0.0) or 0.0)
+            self._tgt = float(getattr(self._mr, "nozzle_target" if self._is_nozzle else "bed_target", 0.0) or 0.0)
+            if hasattr(self._mr, "temps_updated"):
+                self._mr.temps_updated.connect(self._on_temps)
+
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QtWidgets.QFrame(self)
+        card.setObjectName("TempTuneCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        card.setStyleSheet(f"QFrame#TempTuneCard {{ background: #0F172A; border: 2px solid {self._accent};"
+                           f" border-radius: {_s(14, scale)}px; }} QLabel {{ background: transparent; border: none; }}")
+        lay = QtWidgets.QVBoxLayout(card)
+        lay.setContentsMargins(_s(18, scale), _s(12, scale), _s(18, scale), _s(12, scale))
+        lay.setSpacing(_s(10, scale))
+
+        hdr = QtWidgets.QHBoxLayout()
+        title = QtWidgets.QLabel("NOZZLE TEMPERATURE" if self._is_nozzle else "BED TEMPERATURE")
+        title.setStyleSheet(f"color: {self._accent}; font-size: {_s(16, scale)}px; font-weight: 900; letter-spacing: 0.6px;")
+        hdr.addWidget(title)
+        hdr.addStretch(1)
+        close_btn = QtWidgets.QPushButton("✕")
+        close_btn.setFixedSize(_s(36, scale), _s(36, scale))
+        close_btn.setStyleSheet(f"QPushButton {{ background: rgba(255,255,255,0.08); color: #CBD5E1;"
+                                f" border: 1px solid rgba(255,255,255,0.15); border-radius: {_s(18, scale)}px;"
+                                f" font-size: {_s(15, scale)}px; font-weight: 800; }}")
+        close_btn.clicked.connect(self.close)
+        hdr.addWidget(close_btn)
+        lay.addLayout(hdr)
+
+        self.cur_lbl = QtWidgets.QLabel("")
+        self.cur_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cur_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(14, scale)}px; font-weight: 700;")
+        lay.addWidget(self.cur_lbl)
+
+        # - [target] + row
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(_s(14, scale))
+
+        def _big_btn(txt, delta):
+            b = QtWidgets.QPushButton(txt)
+            b.setFixedSize(_s(96, scale), _s(76, scale))
+            b.setStyleSheet(f"QPushButton {{ background: rgba(255,255,255,0.07); color: {self._accent};"
+                            f" border: 1.5px solid {self._accent}; border-radius: {_s(12, scale)}px;"
+                            f" font-size: {_s(38, scale)}px; font-weight: 900; }}"
+                            f"QPushButton:pressed {{ background: rgba(255,255,255,0.22); }}")
+            b.clicked.connect(lambda _c=False: self._adjust(delta))
+            return b
+
+        row.addWidget(_big_btn("−", -1))
+        self.tgt_lbl = QtWidgets.QLabel("0°C")
+        self.tgt_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.tgt_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(48, scale)}px; font-weight: 900; font-family: monospace;")
+        row.addWidget(self.tgt_lbl, 1)
+        row.addWidget(_big_btn("+", +1))
+        lay.addLayout(row)
+
+        # Step selector
+        step_row = QtWidgets.QHBoxLayout()
+        step_row.setSpacing(_s(8, scale))
+        sl = QtWidgets.QLabel("STEP:")
+        sl.setStyleSheet(f"color: {self._accent}; font-size: {_s(13, scale)}px; font-weight: 900;")
+        step_row.addWidget(sl)
+        self._step_btns = []
+        for st in self._steps:
+            b = QtWidgets.QPushButton(f"{st}°")
+            b.setCheckable(True)
+            b.setChecked(st == self._step)
+            b.setFixedHeight(_s(40, scale))
+            b.setStyleSheet(f"QPushButton {{ background: rgba(30,41,59,0.85); color: #94A3B8;"
+                            f" border: 1px solid rgba(255,255,255,0.14); border-radius: {_s(8, scale)}px;"
+                            f" font-size: {_s(14, scale)}px; font-weight: 800; }}"
+                            f"QPushButton:checked {{ background: rgba(255,255,255,0.15); color: {self._accent};"
+                            f" border: 1.5px solid {self._accent}; }}")
+            b.clicked.connect(lambda _c=False, v=st: self._set_step(v))
+            step_row.addWidget(b, 1)
+            self._step_btns.append(b)
+        lay.addLayout(step_row)
+
+        # Preset / off row
+        presets = ([("PLA", 210), ("PETG", 240), ("ABS", 260)] if self._is_nozzle
+                   else [("PLA", 60), ("PETG", 80), ("ABS", 100)])
+        pr = QtWidgets.QHBoxLayout()
+        pr.setSpacing(_s(8, scale))
+        for name, t in presets:
+            b = QtWidgets.QPushButton(f"{name} {t}°")
+            b.setFixedHeight(_s(40, scale))
+            b.setStyleSheet(f"QPushButton {{ background: rgba(255,255,255,0.06); color: #E2E8F0;"
+                            f" border: 1px solid rgba(255,255,255,0.15); border-radius: {_s(8, scale)}px;"
+                            f" font-size: {_s(13, scale)}px; font-weight: 800; }}"
+                            f"QPushButton:pressed {{ background: rgba(255,255,255,0.2); }}")
+            b.clicked.connect(lambda _c=False, v=t: self._apply(v))
+            pr.addWidget(b, 1)
+        off = QtWidgets.QPushButton("OFF")
+        off.setFixedHeight(_s(40, scale))
+        off.setStyleSheet(f"QPushButton {{ background: rgba(239,68,68,0.18); color: #F87171;"
+                          f" border: 1px solid #EF4444; border-radius: {_s(8, scale)}px;"
+                          f" font-size: {_s(13, scale)}px; font-weight: 900; }}")
+        off.clicked.connect(lambda: self._apply(0))
+        pr.addWidget(off, 1)
+        lay.addLayout(pr)
+
+        done = QtWidgets.QPushButton("DONE")
+        done.setFixedHeight(_s(44, scale))
+        done.setStyleSheet(f"QPushButton {{ background: {self._accent}; color: #0F172A; border: none;"
+                           f" border-radius: {_s(10, scale)}px; font-size: {_s(15, scale)}px; font-weight: 900; }}")
+        done.clicked.connect(self.close)
+        lay.addWidget(done)
+
+        outer.addWidget(card)
+        card.setFixedWidth(_s(520, scale))
+        self._refresh()
+
+    def _refresh(self):
+        self.cur_lbl.setText(f"Current: {self._cur:.1f}°C")
+        self.tgt_lbl.setText(f"{self._tgt:.0f}°C" if self._tgt > 0 else "OFF")
+
+    def _on_temps(self, n_cur, n_tgt, b_cur, b_tgt):
+        if self._is_nozzle:
+            self._cur = n_cur
+            self._tgt = n_tgt
+        else:
+            self._cur = b_cur
+            self._tgt = b_tgt
+        self._refresh()
+
+    def _set_step(self, v: int):
+        self._step = v
+        for b, st in zip(self._step_btns, self._steps):
+            b.setChecked(st == v)
+
+    def _adjust(self, direction: int):
+        base = self._tgt if self._tgt > 0 else (self._cur if direction > 0 and self._cur > 40 else 0.0)
+        self._apply(max(0, min(self._max_t, round(base + direction * self._step))))
+
+    def _apply(self, target: float):
+        self._tgt = float(target)
+        self._refresh()
+        if self._mr:
+            self._mr.set_temperature(self.heater, float(target))
+
+    def close(self):
+        if self._mr and hasattr(self._mr, "temps_updated"):
+            try:
+                self._mr.temps_updated.disconnect(self._on_temps)
+            except Exception:
+                pass
+        super().close()
+        self.closed.emit()
+
+    def mousePressEvent(self, event):
+        event.accept()

@@ -11,7 +11,7 @@ from typing import Optional
 from .qt import QtWidgets, QtCore, QtGui, Qt, Signal
 from . import icons
 from .thumbnail_helper import load_thumbnail_async, get_default_thumbnail
-from .fine_tune_dialog import FineTuneOverlay
+from .fine_tune_dialog import FineTuneOverlay, TempTuneOverlay
 
 
 def _s(v: float, s: float) -> int:
@@ -24,6 +24,21 @@ def format_hms(seconds: float) -> str:
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+class ClickableFrame(QtWidgets.QFrame):
+    """Frame that emits clicked on a tap (not a drag)."""
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        self._pressed = True
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if getattr(self, "_pressed", False) and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+        self._pressed = False
+        event.accept()
 
 
 class CancelConfirmOverlay(QtWidgets.QFrame):
@@ -140,6 +155,9 @@ class PrintingPage(QtWidgets.QWidget):
         self._print_duration = 0.0
         self._progress = 0.0
         self._estimated_total = 0.0
+        self._meta_layer_height = 0.0
+        self._meta_first_layer = 0.0
+        self._meta_object_height = 0.0
 
         main_layout = QtWidgets.QHBoxLayout(self)
         main_layout.setContentsMargins(14, 10, 14, 12)
@@ -330,8 +348,8 @@ class PrintingPage(QtWidgets.QWidget):
         self.stats_list_layout.setHorizontalSpacing(8)
         self.stats_list_layout.setVerticalSpacing(5)
 
-        def _make_metric_row(icon: str, label: str, default_val: str, val_col: str):
-            row = QtWidgets.QFrame()
+        def _make_metric_row(icon: str, label: str, default_val: str, val_col: str, big: bool = False):
+            row = ClickableFrame()
             row.setStyleSheet("""
                 QFrame {
                     background: rgba(255, 255, 255, 0.035);
@@ -340,31 +358,40 @@ class PrintingPage(QtWidgets.QWidget):
                 }
             """)
             r_lay = QtWidgets.QHBoxLayout(row)
-            r_lay.setContentsMargins(8, 4, 8, 4)
+            r_lay.setContentsMargins(8, 8 if big else 4, 8, 8 if big else 4)
             r_lay.setSpacing(6)
 
             lbl_title = QtWidgets.QLabel(f"{icon} {label}")
-            lbl_title.setStyleSheet("color: #94A3B8; font-size: 13px; font-weight: 700; background: transparent; border: none;")
+            lbl_title.setStyleSheet(f"color: #94A3B8; font-size: {15 if big else 13}px; font-weight: 700; background: transparent; border: none;")
             r_lay.addWidget(lbl_title)
             r_lay.addStretch(1)
 
             lbl_val = QtWidgets.QLabel(default_val)
-            lbl_val.setStyleSheet(f"color: {val_col}; font-size: 14px; font-weight: 800; font-family: monospace; background: transparent; border: none;")
+            lbl_val.setStyleSheet(f"color: {val_col}; font-size: {18 if big else 14}px; font-weight: 800; font-family: monospace; background: transparent; border: none;")
             r_lay.addWidget(lbl_val)
             return row, lbl_val
 
-        self.row_noz, self.noz_lbl = _make_metric_row("♨️", "Nozzle", "0.0°C / 0°C", "#FF9A3C")
-        self.row_bed, self.bed_lbl = _make_metric_row("🛏️", "Bed", "0.0°C / 0°C", "#00E5FF")
+        self.row_noz, self.noz_lbl = _make_metric_row("♨️", "Nozzle", "0.0°C / 0°C", "#FF9A3C", big=True)
+        self.row_bed, self.bed_lbl = _make_metric_row("🛏️", "Bed", "0.0°C / 0°C", "#00E5FF", big=True)
         self.row_spd, self.spd_lbl = _make_metric_row("⚡", "Speed", "100%", "#38BDF8")
         self.row_flow, self.flow_lbl = _make_metric_row("💧", "Flow", "100%", "#34D399")
         self.row_fan, self.fan_lbl = _make_metric_row("🌀", "Fan", "0%", "#A78BFA")
+        self.row_layer, self.layer_val_lbl = _make_metric_row("📚", "Layer", "-- / --", "#F8FAFC")
         self.rates_lbl = self.spd_lbl
+        for _row, _heater in ((self.row_noz, "extruder"), (self.row_bed, "heater_bed")):
+            _row.setCursor(Qt.CursorShape.PointingHandCursor)
+            _row.setStyleSheet(
+                "QFrame { background: rgba(255,255,255,0.06); border: 1px solid rgba(0,229,255,0.35); border-radius: 8px; }"
+                "QFrame:hover { background: rgba(255,255,255,0.12); }"
+            )
+            _row.clicked.connect(lambda h=_heater: self._open_temp_tune(h))
 
         self.stats_list_layout.addWidget(self.row_noz, 0, 0)
         self.stats_list_layout.addWidget(self.row_bed, 0, 1)
         self.stats_list_layout.addWidget(self.row_spd, 1, 0)
         self.stats_list_layout.addWidget(self.row_flow, 1, 1)
         self.stats_list_layout.addWidget(self.row_fan, 2, 0)
+        self.stats_list_layout.addWidget(self.row_layer, 2, 1)
         right_layout.addWidget(self.stats_list_widget)
 
         right_layout.addStretch(1)
@@ -652,6 +679,19 @@ class PrintingPage(QtWidgets.QWidget):
         tot_l = st.get("total_layer")
         z_pos = st.get("z_pos", 0.0)
 
+        # Layer numbers: prefer Klipper's SET_PRINT_STATS_INFO, else estimate from Z + file metadata
+        layer_est = False
+        if (cur_l is None or tot_l is None or not tot_l) and self._meta_layer_height > 0 and self._meta_object_height > 0:
+            first = self._meta_first_layer or self._meta_layer_height
+            tot_l = max(1, round((self._meta_object_height - first) / self._meta_layer_height) + 1)
+            z_now = max(0.0, z_pos - float(st.get("z_offset", 0.0)))
+            cur_l = min(tot_l, max(0, round((z_now - first) / self._meta_layer_height) + 1)) if z_now > 0 else 0
+            layer_est = True
+        if cur_l is not None and tot_l:
+            self.layer_val_lbl.setText(f"{cur_l} / {tot_l}" + (" ~" if layer_est else ""))
+        else:
+            self.layer_val_lbl.setText("-- / --")
+
         if bed_heating and noz_heating:
             act_text = f"🔥 Heating Bed ({b_cur:.0f}→{b_tgt:.0f}°C) & Nozzle ({n_cur:.0f}→{n_tgt:.0f}°C)"
         elif bed_heating:
@@ -778,6 +818,9 @@ class PrintingPage(QtWidgets.QWidget):
         )
 
         def _on_meta(m: dict):
+            self._meta_layer_height = float(m.get("layer_height") or 0.0)
+            self._meta_first_layer = float(m.get("first_layer_height") or 0.0)
+            self._meta_object_height = float(m.get("object_height") or 0.0)
             est = m.get("estimated_time")
             if est:
                 self._estimated_total = float(est)
@@ -835,6 +878,12 @@ class PrintingPage(QtWidgets.QWidget):
     def _open_fine_tune(self):
         main_win = self.window()
         overlay = FineTuneOverlay(parent=main_win, scale=self._scale)
+        overlay.show()
+        overlay.raise_()
+
+    def _open_temp_tune(self, heater: str):
+        main_win = self.window()
+        overlay = TempTuneOverlay(heater, parent=main_win, scale=self._scale)
         overlay.show()
         overlay.raise_()
 
