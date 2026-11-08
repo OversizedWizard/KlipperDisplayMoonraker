@@ -304,8 +304,8 @@ class BedMeshCanvas(QtWidgets.QWidget):
             if abs(dx) > 2 or abs(dy) > 2:
                 self._drag_moved = True
             if self._mode == "result" and self._view in ("plate", "surface"):
-                self._rot_y += dx * 0.0085
-                self._rot_x = max(0.15, min(1.42, self._rot_x + dy * 0.0085))
+                self._rot_y -= dx * 0.0085
+                self._rot_x = max(0.15, min(1.42, self._rot_x - dy * 0.0085))
                 self._last_pos = pos
                 self.update()
             event.accept()
