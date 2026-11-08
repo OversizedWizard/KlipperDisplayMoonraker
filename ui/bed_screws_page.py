@@ -433,7 +433,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
         self.btn_move.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_move.setStyleSheet(_BTN_PRIMARY)
         self.btn_move.clicked.connect(self._on_move_to_selected)
-        side.addWidget(self.btn_move)
+        self.btn_move.hide()
 
         self.btn_probe = QtWidgets.QPushButton("🔍  Probe This Screw")
         self.btn_probe.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -452,7 +452,17 @@ class BedScrewsScreen(QtWidgets.QFrame):
             QPushButton:disabled { background: rgba(30, 41, 59, 0.6); color: #64748B; border-color: rgba(255, 255, 255, 0.1); }
         """)
         self.btn_probe.clicked.connect(self._on_probe_selected)
-        side.addWidget(self.btn_probe)
+        self.btn_probe.hide()
+
+        touch_hint = QtWidgets.QLabel("👆 Touch any screw on the grid to move toolhead & probe it")
+        touch_hint.setWordWrap(True)
+        touch_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        touch_hint.setStyleSheet(
+            "color: #38BDF8; background: rgba(56, 189, 248, 0.10);"
+            "border: 1px solid rgba(56, 189, 248, 0.30); border-radius: 7px;"
+            "font-size: 11px; font-weight: 800; padding: 6px 8px;"
+        )
+        side.addWidget(touch_hint)
 
         self.btn_probe_all = QtWidgets.QPushButton("⚡  Probe All Screws (Calculate)")
         self.btn_probe_all.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -815,14 +825,14 @@ class BedScrewsScreen(QtWidgets.QFrame):
                 self.dev_val_lbl.setText(f"Not yet probed ({ref_hint})")
                 self.dev_val_lbl.setStyleSheet("color: #94A3B8; font-size: 14px; font-weight: 900; font-family: 'Consolas', monospace;")
                 if self._base_z is not None:
-                    self.guidance_note.setText(f"Center reference is locked (Z = {self._base_z:.3f} mm). Tap 'Probe' to measure this screw directly.")
+                    self.guidance_note.setText(f"Center reference is locked (Z = {self._base_z:.3f} mm). Touch this screw on the bed grid to probe it.")
                 else:
                     self.guidance_note.setText("Center reference not yet recorded. Probing will automatically get center reference first, then probe this screw.")
 
     def _on_screw_selected_from_canvas(self, idx: int):
         self._select_screw(idx)
-        # Immediately move to touched screw point
-        self._on_move_to_selected()
+        # Immediately move toolhead to touched screw point and probe it
+        self._on_probe_selected()
 
     def _on_move_to_selected(self):
         sc = next((s for s in self._screws if s["index"] == self._selected_screw_idx), None)
@@ -893,10 +903,12 @@ class BedScrewsScreen(QtWidgets.QFrame):
 
         tare_step = mr.tare_gcode() if (mr and hasattr(mr, "tare_gcode")) else ""
         has_lc = bool(tare_step)
+        home_prefix = "G28\n" if "xyz" not in (mr.homed_axes or "").lower() else ""
 
         if needs_ref:
             self.status_lbl.setText(f"Taring probe and measuring Center Reference first ({base_sc['name']}), then Screw {sc['index']}...")
             cmd = (
+                f"{home_prefix}"
                 f"G90\n"
                 f"G1 Z{hop} F1200\n"
                 f"G1 X{base_sc['x']:.2f} Y{base_sc['y']:.2f} F{speed_f}\n"
@@ -920,6 +932,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
             else:
                 self.status_lbl.setText(f"Taring probe and measuring Screw {sc['index']} ({sc['name']}) using locked Center Reference...")
             cmd = (
+                f"{home_prefix}"
                 f"G90\n"
                 f"G1 Z{hop} F1200\n"
                 f"G1 X{sc['x']:.2f} Y{sc['y']:.2f} F{speed_f}\n"
@@ -945,7 +958,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
                                 if float(item.get("time", 0.0)) < start_t - 1.0:
                                     continue
                                 msg = item.get("message", "")
-                                m = re.search(r"(?:contact at|Result is)\s+z=\s*([\d\.-]+)", msg, re.IGNORECASE)
+                                m = re.search(r"Result(?:\s+is|:\s+at\s+[\d\.,-]+\s+estimate\s+contact\s+at)\s+z=\s*([\d\.-]+)", msg, re.IGNORECASE)
                                 if m:
                                     readings.append(float(m.group(1)))
                 except Exception:
@@ -1066,9 +1079,10 @@ class BedScrewsScreen(QtWidgets.QFrame):
         base_sc = next((s for s in self._screws if s.get("is_base", False)), self._screws[0])
         ordered_screws = [base_sc] + [s for s in self._screws if s["index"] != base_sc["index"]]
 
+        home_prefix = "G28\n" if "xyz" not in (mr.homed_axes or "").lower() else ""
         if has_lc:
             tare_step = mr.tare_gcode()
-            cmd_lines = ["G90", f"G1 Z{hop} F1200"]
+            cmd_lines = ([home_prefix.strip()] if home_prefix else []) + ["G90", f"G1 Z{hop} F1200"]
             for s in ordered_screws:
                 cmd_lines.append(f"G90\nG1 X{s['x']:.2f} Y{s['y']:.2f} F{speed_f}")
                 cmd_lines.append(f"{tare_step}PROBE")
@@ -1099,7 +1113,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
                                 if float(item.get("time", 0.0)) < start_t - 1.0:
                                     continue
                                 msg = item.get("message", "")
-                                m = re.search(r"(?:contact at|Result is)\s+z=\s*([\d\.-]+)", msg, re.IGNORECASE)
+                                m = re.search(r"Result(?:\s+is|:\s+at\s+[\d\.,-]+\s+estimate\s+contact\s+at)\s+z=\s*([\d\.-]+)", msg, re.IGNORECASE)
                                 if m:
                                     readings.append(float(m.group(1)))
                 except Exception:

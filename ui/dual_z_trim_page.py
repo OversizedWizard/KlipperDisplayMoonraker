@@ -820,7 +820,7 @@ class DualZTrimScreen(QtWidgets.QFrame):
                         if float(item.get("time", 0.0)) < start_t - 1.0:
                             continue
                         msg = item.get("message", "")
-                        m = re.search(r"(?:contact at|Result is|probe at [^i]+ is)\s+z=\s*([\d\.-]+)", msg, re.IGNORECASE)
+                        m = re.search(r"Result(?:\s+is|:\s+at\s+[\d\.,-]+\s+estimate\s+contact\s+at)\s+z=\s*([\d\.-]+)", msg, re.IGNORECASE)
                         if m:
                             readings.append(float(m.group(1)))
         except Exception:

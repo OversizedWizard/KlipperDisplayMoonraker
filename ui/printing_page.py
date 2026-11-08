@@ -176,13 +176,13 @@ class PrintingPage(QtWidgets.QWidget):
             }
         """)
         left_layout = QtWidgets.QVBoxLayout(self.left_card)
-        left_layout.setContentsMargins(12, 12, 12, 12)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(10, 10, 10, 10)
+        left_layout.setSpacing(5)
         left_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Big Thumbnail image
         self.thumb_lbl = QtWidgets.QLabel()
-        self.thumb_lbl.setFixedSize(172, 172)
+        self.thumb_lbl.setFixedSize(152, 152)
         self.thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_lbl.setStyleSheet("""
             background: #1E293B;
@@ -199,12 +199,27 @@ class PrintingPage(QtWidgets.QWidget):
         self.filename_lbl.setStyleSheet("color: #F8FAFC; font-size: 15px; font-weight: 800;")
         left_layout.addWidget(self.filename_lbl)
 
-        # Layer & Height tag
+        # Separate lines under preview: Layer, Z Pos, X & Y Pos, Current Speed (mm/s)
         self.layer_lbl = QtWidgets.QLabel("Layer: -- / --")
         self.layer_lbl.setWordWrap(True)
         self.layer_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layer_lbl.setStyleSheet("color: #00E5FF; font-size: 13px; font-weight: 800;")
         left_layout.addWidget(self.layer_lbl)
+
+        self.z_pos_lbl = QtWidgets.QLabel("Z: 0.00 mm")
+        self.z_pos_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.z_pos_lbl.setStyleSheet("color: #F8FAFC; font-size: 13px; font-weight: 800; font-family: monospace;")
+        left_layout.addWidget(self.z_pos_lbl)
+
+        self.xy_pos_lbl = QtWidgets.QLabel("X: 0.0   Y: 0.0 mm")
+        self.xy_pos_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.xy_pos_lbl.setStyleSheet("color: #CBD5E1; font-size: 12px; font-weight: 800; font-family: monospace;")
+        left_layout.addWidget(self.xy_pos_lbl)
+
+        self.cur_spd_lbl = QtWidgets.QLabel("Speed: 0 mm/s")
+        self.cur_spd_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cur_spd_lbl.setStyleSheet("color: #38BDF8; font-size: 13px; font-weight: 800; font-family: monospace;")
+        left_layout.addWidget(self.cur_spd_lbl)
 
         # Under-Image Z-Offset & Baby Steps Telemetry Box
         self.z_info_card = QtWidgets.QFrame()
@@ -692,21 +707,26 @@ class PrintingPage(QtWidgets.QWidget):
         else:
             self.layer_val_lbl.setText("-- / --")
 
-        if bed_heating and noz_heating:
-            act_text = f"🔥 Heating Bed ({b_cur:.0f}→{b_tgt:.0f}°C) & Nozzle ({n_cur:.0f}→{n_tgt:.0f}°C)"
+        x_pos = float(st.get("x_pos", 0.0) or 0.0)
+        y_pos = float(st.get("y_pos", 0.0) or 0.0)
+        live_vel = float(st.get("live_velocity", 0.0) or 0.0)
+
+        if cur_l is not None and tot_l is not None and tot_l > 0:
+            act_text = f"Layer: {cur_l} / {tot_l}" + (" ~" if layer_est else "")
+        elif bed_heating and noz_heating:
+            act_text = f"🔥 Bed {b_cur:.0f}/{b_tgt:.0f}°C • Noz {n_cur:.0f}/{n_tgt:.0f}°C"
         elif bed_heating:
-            act_text = f"🔥 Heating Bed to {b_tgt:.0f}°C (current: {b_cur:.1f}°C)"
+            act_text = f"🔥 Heating Bed ({b_cur:.0f}→{b_tgt:.0f}°C)"
         elif noz_heating:
-            act_text = f"🔥 Heating Nozzle to {n_tgt:.0f}°C (current: {n_cur:.1f}°C)"
+            act_text = f"🔥 Heating Nozzle ({n_cur:.0f}→{n_tgt:.0f}°C)"
         elif msg:
             act_text = f"⚡ {msg}"
-        elif cur_l is not None and tot_l is not None and tot_l > 0:
-            act_text = f"Layer: {cur_l} / {tot_l}  (Z: {z_pos:.2f} mm)"
-        elif self._print_duration > 0:
-            act_text = f"Printing • Z: {z_pos:.2f} mm"
         else:
-            act_text = "Preparing print..."
+            act_text = "Layer: -- / --"
         self.layer_lbl.setText(act_text)
+        self.z_pos_lbl.setText(f"Z: {z_pos:.2f} mm")
+        self.xy_pos_lbl.setText(f"X: {x_pos:.1f}   Y: {y_pos:.1f} mm")
+        self.cur_spd_lbl.setText(f"Speed: {live_vel:.0f} mm/s")
 
         # Speeds & Babystep
         spd = round(float(st.get("speed_factor", 1.0)) * 100)
@@ -925,7 +945,7 @@ class PrintingPage(QtWidgets.QWidget):
     def apply_scale(self, s: float):
         self._scale = s
         self.left_card.setFixedWidth(_s(240, s))
-        sz = _s(168, s)
+        sz = _s(152, s)
         self.thumb_lbl.setFixedSize(sz, sz)
 
 

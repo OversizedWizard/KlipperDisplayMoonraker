@@ -115,7 +115,7 @@ class MoonrakerClient(QtCore.QObject):
                 if h not in candidates:
                     candidates.append(h)
 
-            query_path = "/printer/objects/query?extruder&heater_bed&webhooks&toolhead&gcode_move&load_cell_probe&load_cell&probe&print_stats&virtual_sdcard&display_status&fan&bed_mesh"
+            query_path = "/printer/objects/query?extruder&heater_bed&webhooks&toolhead&gcode_move&motion_report&load_cell_probe&load_cell&probe&print_stats&virtual_sdcard&display_status&fan&bed_mesh"
             for host in candidates:
                 try:
                     data = self._fetch_json(host, query_path, timeout=1.2)
@@ -126,6 +126,7 @@ class MoonrakerClient(QtCore.QObject):
                         wh = status.get("webhooks", {})
                         toolhead = status.get("toolhead", {})
                         gcode_move = status.get("gcode_move", {})
+                        motion_rep = status.get("motion_report", {})
 
                         n_cur = float(ext.get("temperature", 0.0))
                         n_tgt = float(ext.get("target", 0.0))
@@ -141,7 +142,7 @@ class MoonrakerClient(QtCore.QObject):
                         z_offset = float(homing_origin[2]) if len(homing_origin) > 2 else 0.0
 
                         # Coordinates & homed axes (use physical position so Z reflects SET_GCODE_OFFSET moves)
-                        pos = gcode_move.get("position") or toolhead.get("position") or gcode_move.get("gcode_position") or [0.0, 0.0, 0.0, 0.0]
+                        pos = motion_rep.get("live_position") or gcode_move.get("position") or toolhead.get("position") or gcode_move.get("gcode_position") or [0.0, 0.0, 0.0, 0.0]
                         x_pos = float(pos[0]) if len(pos) > 0 else 0.0
                         y_pos = float(pos[1]) if len(pos) > 1 else 0.0
                         z_pos = float(pos[2]) if len(pos) > 2 else 0.0
@@ -219,7 +220,10 @@ class MoonrakerClient(QtCore.QObject):
                             "nozzle_tgt": n_tgt,
                             "bed_cur": b_cur,
                             "bed_tgt": b_tgt,
+                            "x_pos": x_pos,
+                            "y_pos": y_pos,
                             "z_pos": z_pos,
+                            "live_velocity": float(motion_rep.get("live_velocity", 0.0) or 0.0),
                             "message": str(p_stats.get("message") or d_status.get("message") or "")
                         }
                         self.last_print_stats = stats_dict
