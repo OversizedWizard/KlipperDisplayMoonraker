@@ -868,13 +868,10 @@ class MoonrakerClient(QtCore.QObject):
                     on_done(mode)
                 return
 
-            # 1. Manage [include KAMP_Settings.cfg] at top of printer.cfg
+            # 1. Keep [include KAMP_Settings.cfg] active so SMART_PARK and LINE_PURGE always work
             kamp_re = re.compile(r"^(\s*)#*\s*(\[include\s+[^\]\r\n]*KAMP_Settings\.cfg\])", re.MULTILINE | re.IGNORECASE)
             if kamp_re.search(content):
-                if mode == "kamp":
-                    content = kamp_re.sub(r"\1\2", content, count=1)
-                else:
-                    content = kamp_re.sub(r"\1#\2", content, count=1)
+                content = kamp_re.sub(r"\1\2", content, count=1)
             elif mode == "kamp":
                 # Insert right after [include mainsail.cfg] or at very top
                 ms_re = re.compile(r"^(\s*\[include\s+mainsail\.cfg\][^\r\n]*)", re.MULTILINE | re.IGNORECASE)
