@@ -305,7 +305,7 @@ class LevellingModeOverlay(QtWidgets.QFrame):
             (
                 "kamp",
                 "⚡  KAMP (Adaptive Mesh)",
-                "Probes only the model print area before each print (KAMP BED_MESH_CALIBRATE)",
+                "Probes only the model print area before each print (BED_MESH_CALIBRATE)",
                 "#00E5FF",
                 "rgba(0, 229, 255, 0.16)",
             ),
