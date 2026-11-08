@@ -1,4 +1,4 @@
-"""Active 3D printing screen.
+﻿"""Active 3D printing screen.
 
 Displays live print progress, large gcode thumbnail, elapsed / remaining time,
 temperatures, Fine Tune button (baby stepping, temps, speed/flow/fan),
@@ -178,13 +178,13 @@ class PrintingPage(QtWidgets.QWidget):
         self.filename_lbl = QtWidgets.QLabel("No Active Print")
         self.filename_lbl.setWordWrap(True)
         self.filename_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.filename_lbl.setStyleSheet("color: #F8FAFC; font-size: 13px; font-weight: 800;")
+        self.filename_lbl.setStyleSheet("color: #F8FAFC; font-size: 15px; font-weight: 800;")
         left_layout.addWidget(self.filename_lbl)
 
         # Layer & Height tag
         self.layer_lbl = QtWidgets.QLabel("Layer: -- / --")
         self.layer_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.layer_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 800;")
+        self.layer_lbl.setStyleSheet("color: #00E5FF; font-size: 13px; font-weight: 800;")
         left_layout.addWidget(self.layer_lbl)
 
         # Under-Image Z-Offset & Baby Steps Telemetry Box
@@ -209,9 +209,9 @@ class PrintingPage(QtWidgets.QWidget):
         r1 = QtWidgets.QHBoxLayout()
         r1.setSpacing(4)
         lbl_adj_title = QtWidgets.QLabel("Z Adjust Offset")
-        lbl_adj_title.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800;")
+        lbl_adj_title.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 800;")
         self.adj_z_val_lbl = QtWidgets.QLabel("+0.000 mm")
-        self.adj_z_val_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 900; font-family: monospace;")
+        self.adj_z_val_lbl.setStyleSheet("color: #00E5FF; font-size: 13px; font-weight: 900; font-family: monospace;")
         r1.addWidget(lbl_adj_title)
         r1.addStretch(1)
         r1.addWidget(self.adj_z_val_lbl)
@@ -221,9 +221,9 @@ class PrintingPage(QtWidgets.QWidget):
         r2 = QtWidgets.QHBoxLayout()
         r2.setSpacing(4)
         lbl_bs_title = QtWidgets.QLabel("Baby Steps Added")
-        lbl_bs_title.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800;")
+        lbl_bs_title.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 800;")
         self.babystep_added_lbl = QtWidgets.QLabel("0  (+0.000 mm)")
-        self.babystep_added_lbl.setStyleSheet("color: #34D399; font-size: 11px; font-weight: 900; font-family: monospace;")
+        self.babystep_added_lbl.setStyleSheet("color: #34D399; font-size: 13px; font-weight: 900; font-family: monospace;")
         r2.addWidget(lbl_bs_title)
         r2.addStretch(1)
         r2.addWidget(self.babystep_added_lbl)
@@ -256,20 +256,20 @@ class PrintingPage(QtWidgets.QWidget):
         self.status_pill.setStyleSheet("""
             color: #38BDF8; background: rgba(56, 189, 248, 0.15);
             border: 1px solid rgba(56, 189, 248, 0.4);
-            border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 8px;
+            border-radius: 6px; font-size: 13px; font-weight: 800; padding: 2px 8px;
         """)
         status_row.addWidget(self.status_pill)
         status_row.addStretch(1)
 
         self.babystep_lbl = QtWidgets.QLabel("Z-Offset: +0.000 mm")
-        self.babystep_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 700; font-family: monospace;")
+        self.babystep_lbl.setStyleSheet("color: #94A3B8; font-size: 13px; font-weight: 700; font-family: monospace;")
         status_row.addWidget(self.babystep_lbl)
         right_layout.addLayout(status_row)
 
         # Large Progress Row: Percentage & Progress Bar
         prog_row = QtWidgets.QHBoxLayout()
         self.pct_lbl = QtWidgets.QLabel("0%")
-        self.pct_lbl.setStyleSheet("color: #00E5FF; font-size: 26px; font-weight: 900; letter-spacing: -0.5px;")
+        self.pct_lbl.setStyleSheet("color: #00E5FF; font-size: 30px; font-weight: 900; letter-spacing: -0.5px;")
         prog_row.addWidget(self.pct_lbl)
         prog_row.addSpacing(10)
 
@@ -282,59 +282,52 @@ class PrintingPage(QtWidgets.QWidget):
         prog_row.addWidget(self.progress_bar, 1)
         right_layout.addLayout(prog_row)
 
-        # Time Metrics (3 Columns: Elapsed, Remaining, ETA)
+        # Time Metrics: row 1 = live (print-progress based), row 2 = slicer estimate based
         time_grid = QtWidgets.QGridLayout()
-        time_grid.setHorizontalSpacing(10)
+        time_grid.setHorizontalSpacing(8)
+        time_grid.setVerticalSpacing(6)
 
-        # Elapsed
-        el_card = QtWidgets.QFrame()
-        el_card.setStyleSheet("background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 4px;")
-        el_lay = QtWidgets.QVBoxLayout(el_card)
-        el_lay.setContentsMargins(6, 4, 6, 4)
-        el_lay.setSpacing(1)
-        el_t = QtWidgets.QLabel("ELAPSED")
-        el_t.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800;")
-        self.el_val = QtWidgets.QLabel("00:00:00")
-        self.el_val.setStyleSheet("color: #F8FAFC; font-size: 13px; font-weight: 900; font-family: monospace;")
-        el_lay.addWidget(el_t)
-        el_lay.addWidget(self.el_val)
-        time_grid.addWidget(el_card, 0, 0)
+        def _make_time_card(title: str, default: str, val_col: str, accent: str):
+            card = QtWidgets.QFrame()
+            card.setObjectName("TimeCard")
+            card.setStyleSheet(
+                "QFrame#TimeCard { background: rgba(255,255,255,0.05); border-radius: 8px;"
+                f" border-left: 3px solid {accent}; }}"
+                "QLabel { background: transparent; border: none; }"
+            )
+            lay = QtWidgets.QVBoxLayout(card)
+            lay.setContentsMargins(8, 4, 6, 4)
+            lay.setSpacing(0)
+            t = QtWidgets.QLabel(title)
+            t.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 800;")
+            v = QtWidgets.QLabel(default)
+            v.setStyleSheet(f"color: {val_col}; font-size: 17px; font-weight: 900; font-family: monospace;")
+            lay.addWidget(t)
+            lay.addWidget(v)
+            return card, v
 
-        # Remaining
-        rem_card = QtWidgets.QFrame()
-        rem_card.setStyleSheet("background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 4px;")
-        rem_lay = QtWidgets.QVBoxLayout(rem_card)
-        rem_lay.setContentsMargins(6, 4, 6, 4)
-        rem_lay.setSpacing(1)
-        rem_t = QtWidgets.QLabel("REMAINING")
-        rem_t.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800;")
-        self.rem_val = QtWidgets.QLabel("--:--:--")
-        self.rem_val.setStyleSheet("color: #00E5FF; font-size: 13px; font-weight: 900; font-family: monospace;")
-        rem_lay.addWidget(rem_t)
-        rem_lay.addWidget(self.rem_val)
-        time_grid.addWidget(rem_card, 0, 1)
+        c, self.el_val = _make_time_card("ELAPSED", "00:00:00", "#F8FAFC", "#64748B")
+        time_grid.addWidget(c, 0, 0)
+        c, self.rem_val = _make_time_card("REMAINING", "--:--:--", "#00E5FF", "#00E5FF")
+        time_grid.addWidget(c, 0, 1)
+        c, self.eta_val = _make_time_card("PRINT ETA", "--:--", "#34D399", "#34D399")
+        time_grid.addWidget(c, 0, 2)
 
-        # ETA
-        eta_card = QtWidgets.QFrame()
-        eta_card.setStyleSheet("background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 4px;")
-        eta_lay = QtWidgets.QVBoxLayout(eta_card)
-        eta_lay.setContentsMargins(6, 4, 6, 4)
-        eta_lay.setSpacing(1)
-        eta_t = QtWidgets.QLabel("EST. FINISH (ETA)")
-        eta_t.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800;")
-        self.eta_val = QtWidgets.QLabel("--:--")
-        self.eta_val.setStyleSheet("color: #F8FAFC; font-size: 13px; font-weight: 900; font-family: monospace;")
-        eta_lay.addWidget(eta_t)
-        eta_lay.addWidget(self.eta_val)
-        time_grid.addWidget(eta_card, 0, 2)
+        c, self.slicer_total_val = _make_time_card("SLICER TOTAL", "--:--:--", "#CBD5E1", "#A78BFA")
+        time_grid.addWidget(c, 1, 0)
+        c, self.slicer_rem_val = _make_time_card("SLICER LEFT", "--:--:--", "#C4B5FD", "#A78BFA")
+        time_grid.addWidget(c, 1, 1)
+        c, self.slicer_eta_val = _make_time_card("SLICER ETA", "--:--", "#C4B5FD", "#A78BFA")
+        time_grid.addWidget(c, 1, 2)
 
         right_layout.addLayout(time_grid)
 
-        # Live Metrics List (Vertical rows instead of side-by-side)
+        # Live metrics grid (2 columns)
         self.stats_list_widget = QtWidgets.QWidget()
-        self.stats_list_layout = QtWidgets.QVBoxLayout(self.stats_list_widget)
-        self.stats_list_layout.setContentsMargins(0, 4, 0, 4)
-        self.stats_list_layout.setSpacing(5)
+        self.stats_list_layout = QtWidgets.QGridLayout(self.stats_list_widget)
+        self.stats_list_layout.setContentsMargins(0, 2, 0, 2)
+        self.stats_list_layout.setHorizontalSpacing(8)
+        self.stats_list_layout.setVerticalSpacing(5)
 
         def _make_metric_row(icon: str, label: str, default_val: str, val_col: str):
             row = QtWidgets.QFrame()
@@ -346,16 +339,16 @@ class PrintingPage(QtWidgets.QWidget):
                 }
             """)
             r_lay = QtWidgets.QHBoxLayout(row)
-            r_lay.setContentsMargins(10, 4, 10, 4)
-            r_lay.setSpacing(8)
+            r_lay.setContentsMargins(8, 4, 8, 4)
+            r_lay.setSpacing(6)
 
-            lbl_title = QtWidgets.QLabel(f"{icon}  {label}")
-            lbl_title.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 700; background: transparent; border: none;")
+            lbl_title = QtWidgets.QLabel(f"{icon} {label}")
+            lbl_title.setStyleSheet("color: #94A3B8; font-size: 13px; font-weight: 700; background: transparent; border: none;")
             r_lay.addWidget(lbl_title)
             r_lay.addStretch(1)
 
             lbl_val = QtWidgets.QLabel(default_val)
-            lbl_val.setStyleSheet(f"color: {val_col}; font-size: 12px; font-weight: 800; font-family: monospace; background: transparent; border: none;")
+            lbl_val.setStyleSheet(f"color: {val_col}; font-size: 14px; font-weight: 800; font-family: monospace; background: transparent; border: none;")
             r_lay.addWidget(lbl_val)
             return row, lbl_val
 
@@ -366,11 +359,11 @@ class PrintingPage(QtWidgets.QWidget):
         self.row_fan, self.fan_lbl = _make_metric_row("🌀", "Fan", "0%", "#A78BFA")
         self.rates_lbl = self.spd_lbl
 
-        self.stats_list_layout.addWidget(self.row_noz)
-        self.stats_list_layout.addWidget(self.row_bed)
-        self.stats_list_layout.addWidget(self.row_spd)
-        self.stats_list_layout.addWidget(self.row_flow)
-        self.stats_list_layout.addWidget(self.row_fan)
+        self.stats_list_layout.addWidget(self.row_noz, 0, 0)
+        self.stats_list_layout.addWidget(self.row_bed, 0, 1)
+        self.stats_list_layout.addWidget(self.row_spd, 1, 0)
+        self.stats_list_layout.addWidget(self.row_flow, 1, 1)
+        self.stats_list_layout.addWidget(self.row_fan, 2, 0)
         right_layout.addWidget(self.stats_list_widget)
 
         right_layout.addStretch(1)
@@ -524,15 +517,15 @@ class PrintingPage(QtWidgets.QWidget):
             n_tgt = float(st.get("nozzle_tgt", 0.0))
             if b_tgt > 35 and b_cur < b_tgt - 1.5:
                 self.status_pill.setText(f"🔥 HEATING BED ({b_cur:.0f}/{b_tgt:.0f}°C)")
-                self.status_pill.setStyleSheet("color: #FF9A3C; background: rgba(255, 154, 60, 0.20); border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
+                self.status_pill.setStyleSheet("color: #FF9A3C; background: rgba(255, 154, 60, 0.20); border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;")
                 self.layer_lbl.setText(f"🔥 Heating Bed to {b_tgt:.0f}°C (current: {b_cur:.1f}°C)")
             else:
                 self.status_pill.setText("🔥 PREPARING & HEATING")
-                self.status_pill.setStyleSheet("color: #F59E0B; background: rgba(245, 158, 11, 0.20); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
+                self.status_pill.setStyleSheet("color: #F59E0B; background: rgba(245, 158, 11, 0.20); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;")
                 self.layer_lbl.setText("Starting print • Waiting for heaters...")
         else:
             self.status_pill.setText("🔥 STARTING & HEATING")
-            self.status_pill.setStyleSheet("color: #F59E0B; background: rgba(245, 158, 11, 0.20); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;")
+            self.status_pill.setStyleSheet("color: #F59E0B; background: rgba(245, 158, 11, 0.20); border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;")
             self.layer_lbl.setText("Starting print • Waiting for heaters...")
 
         self.actions_stack.setCurrentIndex(0)
@@ -612,20 +605,31 @@ class PrintingPage(QtWidgets.QWidget):
 
         # Times
         self.el_val.setText(format_hms(self._print_duration))
+        now = datetime.now()
+
+        # Live (progress-based) estimate
         if self._progress > 0.01 and self._print_duration > 10:
-            total_est = self._print_duration / self._progress
-            rem = max(0.0, total_est - self._print_duration)
+            rem = max(0.0, self._print_duration / self._progress - self._print_duration)
             self.rem_val.setText(format_hms(rem))
-            eta_time = datetime.now() + timedelta(seconds=rem)
-            self.eta_val.setText(eta_time.strftime("%H:%M"))
+            self.eta_val.setText(self._fmt_eta(now + timedelta(seconds=rem)))
         elif self._estimated_total > 0:
             rem = max(0.0, self._estimated_total - self._print_duration)
             self.rem_val.setText(format_hms(rem))
-            eta_time = datetime.now() + timedelta(seconds=rem)
-            self.eta_val.setText(eta_time.strftime("%H:%M"))
+            self.eta_val.setText(self._fmt_eta(now + timedelta(seconds=rem)))
         else:
             self.rem_val.setText("--:--:--")
             self.eta_val.setText("--:--")
+
+        # Slicer estimate (from gcode file metadata)
+        if self._estimated_total > 0:
+            s_rem = max(0.0, self._estimated_total - self._print_duration)
+            self.slicer_total_val.setText(format_hms(self._estimated_total))
+            self.slicer_rem_val.setText(format_hms(s_rem))
+            self.slicer_eta_val.setText(self._fmt_eta(now + timedelta(seconds=s_rem)))
+        else:
+            self.slicer_total_val.setText("--:--:--")
+            self.slicer_rem_val.setText("--:--:--")
+            self.slicer_eta_val.setText("--:--")
 
         # Temps
         n_cur = st.get("nozzle_cur", 0.0)
@@ -685,37 +689,37 @@ class PrintingPage(QtWidgets.QWidget):
                 self.status_pill.setText("🔥 HEATING")
                 self.status_pill.setStyleSheet("""
                     color: #FF9A3C; background: rgba(255, 154, 60, 0.20);
-                    border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                    border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
                 """)
             elif bed_heating:
                 self.status_pill.setText(f"🔥 HEATING BED ({b_cur:.0f}/{b_tgt:.0f}°C)")
                 self.status_pill.setStyleSheet("""
                     color: #FF9A3C; background: rgba(255, 154, 60, 0.20);
-                    border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                    border: 1px solid #FF9A3C; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
                 """)
             elif noz_heating:
                 self.status_pill.setText(f"🔥 HEATING NOZZLE ({n_cur:.0f}/{n_tgt:.0f}°C)")
                 self.status_pill.setStyleSheet("""
                     color: #FB923C; background: rgba(251, 146, 60, 0.20);
-                    border: 1px solid #FB923C; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                    border: 1px solid #FB923C; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
                 """)
             elif msg and ("hom" in msg.lower() or "prob" in msg.lower() or "mesh" in msg.lower() or "level" in msg.lower()):
                 self.status_pill.setText(f"⚡ {msg[:18].upper()}")
                 self.status_pill.setStyleSheet("""
                     color: #38BDF8; background: rgba(56, 189, 248, 0.20);
-                    border: 1px solid #38BDF8; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                    border: 1px solid #38BDF8; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
                 """)
             elif self._print_duration > 0 or state == "printing":
                 self.status_pill.setText("● PRINTING")
                 self.status_pill.setStyleSheet("""
                     color: #34D399; background: rgba(16, 185, 129, 0.18);
-                    border: 1px solid #10B981; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                    border: 1px solid #10B981; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
                 """)
             else:
                 self.status_pill.setText("● STARTING")
                 self.status_pill.setStyleSheet("""
                     color: #F59E0B; background: rgba(245, 158, 11, 0.20);
-                    border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                    border: 1px solid rgba(245, 158, 11, 0.5); border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
                 """)
             self.btn_pause.setText(" ⏸  PAUSE ")
             self.actions_stack.setCurrentIndex(0)
@@ -723,7 +727,7 @@ class PrintingPage(QtWidgets.QWidget):
             self.status_pill.setText("⏸ PAUSED")
             self.status_pill.setStyleSheet("""
                 color: #FBBF24; background: rgba(251, 191, 36, 0.18);
-                border: 1px solid #F59E0B; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                border: 1px solid #F59E0B; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
             """)
             self.btn_pause.setText(" ▶  RESUME ")
             self.actions_stack.setCurrentIndex(0)
@@ -731,23 +735,30 @@ class PrintingPage(QtWidgets.QWidget):
             self.status_pill.setText("🎉 COMPLETE")
             self.status_pill.setStyleSheet("""
                 color: #00E5FF; background: rgba(0, 229, 255, 0.18);
-                border: 1px solid #00E5FF; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                border: 1px solid #00E5FF; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
             """)
             self.actions_stack.setCurrentIndex(1)
         elif state in ("cancelled", "cancelling"):
             self.status_pill.setText("🚫 CANCELLED")
             self.status_pill.setStyleSheet("""
                 color: #EF4444; background: rgba(239, 68, 68, 0.18);
-                border: 1px solid #EF4444; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+                border: 1px solid #EF4444; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
             """)
             self.actions_stack.setCurrentIndex(0)
         else:
             self.status_pill.setText(state.upper())
             self.status_pill.setStyleSheet("""
                 color: #94A3B8; background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; font-weight: 700; font-size: 11px; padding: 2px 8px;
+                border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; font-weight: 700; font-size: 13px; padding: 2px 8px;
             """)
             self.actions_stack.setCurrentIndex(0)
+
+    @staticmethod
+    def _fmt_eta(dt: datetime) -> str:
+        """Clock time, with day hint if finishing on another day."""
+        days = (dt.date() - datetime.now().date()).days
+        t = dt.strftime("%H:%M")
+        return t if days <= 0 else f"{t} +{days}d"
 
     def _fetch_print_metadata(self, filename: str):
         mr = getattr(self.window(), "moonraker", None)
@@ -797,13 +808,13 @@ class PrintingPage(QtWidgets.QWidget):
         if hasattr(self, "babystep_added_lbl"):
             if abs(z_off) < 1e-4:
                 self.babystep_added_lbl.setText("0  (+0.000 mm)")
-                self.babystep_added_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 800; font-family: monospace;")
+                self.babystep_added_lbl.setStyleSheet("color: #94A3B8; font-size: 13px; font-weight: 800; font-family: monospace;")
             else:
                 if step_count == 0:
                     step_count = round(z_off / 0.01)
                 self.babystep_added_lbl.setText(f"{step_count:+d}  ({z_off:+.3f} mm)")
                 col = "#34D399" if z_off > 0 else "#FBBF24"
-                self.babystep_added_lbl.setStyleSheet(f"color: {col}; font-size: 11px; font-weight: 900; font-family: monospace;")
+                self.babystep_added_lbl.setStyleSheet(f"color: {col}; font-size: 13px; font-weight: 900; font-family: monospace;")
 
     def _set_thumb(self, pm: QtGui.QPixmap):
         if not pm.isNull():
@@ -841,7 +852,7 @@ class PrintingPage(QtWidgets.QWidget):
         self.status_pill.setText("🚫 CANCELLED")
         self.status_pill.setStyleSheet("""
             color: #EF4444; background: rgba(239, 68, 68, 0.18);
-            border: 1px solid #EF4444; border-radius: 6px; font-weight: 800; font-size: 11px; padding: 2px 8px;
+            border: 1px solid #EF4444; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
         """)
         main_win = self.window()
         if hasattr(main_win, "show_page"):
@@ -866,4 +877,5 @@ class PrintingPage(QtWidgets.QWidget):
         self.left_card.setFixedWidth(_s(240, s))
         sz = _s(168, s)
         self.thumb_lbl.setFixedSize(sz, sz)
+
 
