@@ -816,82 +816,121 @@ class MoonrakerClient(QtCore.QObject):
         threading.Thread(target=_run, daemon=True).start()
 
     def check_start_gcode_mesh(self, on_done=None):
-        """Check if bed mesh is active/unhashed or hashed out in printer.cfg start gcode macro."""
+        """Check current bed levelling mode ('normal', 'kamp', or 'off') in printer.cfg."""
         def _on_cfg(content: str):
             if not content:
                 if on_done:
-                    on_done(False, False)
+                    on_done("off", False)
                 return
 
             is_configured = "[bed_mesh" in content
             m = re.search(r"\[gcode_macro\s+(?:PRINT_START|START_PRINT)\].*?(?=\n\[|\Z)", content, re.DOTALL | re.IGNORECASE)
             if not m:
                 if on_done:
-                    on_done(False, is_configured)
+                    on_done("off", is_configured)
                 return
 
             macro_lines = m.group(0).splitlines()
-            is_enabled = False
-            pattern = re.compile(r"^\s*(#*)\s*(BED_MESH_(?:PROFILE\s+LOAD|CALIBRATE)[^\r\n]*)", re.IGNORECASE)
+            has_calibrate = False
+            has_profile_load = False
             for line in macro_lines:
-                match = pattern.search(line)
-                if match:
-                    is_hashed = bool(match.group(1))
-                    if not is_hashed:
-                        is_enabled = True
-                    break
+                clean = line.strip()
+                if not clean or clean.startswith("#") or clean.startswith(";"):
+                    continue
+                # Strip inline comments
+                code = clean.split(";")[0].split("#")[0].strip()
+                if re.match(r"^BED_MESH_CALIBRATE\b", code, re.IGNORECASE):
+                    has_calibrate = True
+                elif re.match(r"^BED_MESH_PROFILE\s+LOAD\b", code, re.IGNORECASE):
+                    has_profile_load = True
+
+            if has_calibrate:
+                mode = "kamp"
+            elif has_profile_load:
+                mode = "normal"
+            else:
+                mode = "off"
 
             if on_done:
-                on_done(is_enabled, is_configured)
+                on_done(mode, is_configured)
 
         self.get_printer_cfg(on_done=_on_cfg)
 
-    def toggle_start_gcode_mesh(self, on_done=None):
-        """Hash or unhash the bed mesh command in the start gcode macro, save printer.cfg, and restart firmware."""
+    def set_start_gcode_mesh_mode(self, mode: str, on_done=None):
+        """Set bed levelling mode in printer.cfg ('normal', 'kamp', or 'off'), save, and restart firmware."""
+        mode = (mode or "off").lower().strip()
+        if mode not in ("normal", "kamp", "off"):
+            mode = "off"
+
         def _on_cfg(content: str):
             if not content:
                 if on_done:
-                    on_done(False)
+                    on_done(mode)
                 return
 
+            # 1. Manage [include KAMP_Settings.cfg] at top of printer.cfg
+            kamp_re = re.compile(r"^(\s*)#*\s*(\[include\s+[^\]\r\n]*KAMP_Settings\.cfg\])", re.MULTILINE | re.IGNORECASE)
+            if kamp_re.search(content):
+                if mode == "kamp":
+                    content = kamp_re.sub(r"\1\2", content, count=1)
+                else:
+                    content = kamp_re.sub(r"\1#\2", content, count=1)
+            elif mode == "kamp":
+                # Insert right after [include mainsail.cfg] or at very top
+                ms_re = re.compile(r"^(\s*\[include\s+mainsail\.cfg\][^\r\n]*)", re.MULTILINE | re.IGNORECASE)
+                if ms_re.search(content):
+                    content = ms_re.sub(r"\1\n[include KAMP_Settings.cfg]", content, count=1)
+                else:
+                    content = "[include KAMP_Settings.cfg]\n" + content
+
+            # 2. Update [gcode_macro PRINT_START] / [gcode_macro START_PRINT]
             m = re.search(r"(\[gcode_macro\s+(?:PRINT_START|START_PRINT)\].*?)(?=\n\[|\Z)", content, re.DOTALL | re.IGNORECASE)
             if not m:
                 if on_done:
-                    on_done(False)
+                    on_done(mode)
                 return
 
             macro_full = m.group(1)
             lines = macro_full.splitlines()
 
-            # Find existing bed_mesh line in start macro
-            found_idx = -1
+            # Locate existing BED_MESH_PROFILE LOAD or BED_MESH_CALIBRATE lines (excluding BED_MESH_CLEAR)
+            mesh_indices = []
             for i, line in enumerate(lines):
-                clean = line.strip()
-                if re.search(r"bed_mesh_(?:profile\s+load|calibrate)", clean, re.IGNORECASE):
-                    found_idx = i
-                    break
+                 stripped = re.sub(r"^\s*#*\s*", "", line.strip())
+                 if re.match(r"^BED_MESH_(?:PROFILE\s+LOAD|CALIBRATE)\b", stripped, re.IGNORECASE):
+                     mesh_indices.append(i)
 
-            if found_idx != -1:
-                old_line = lines[found_idx]
-                is_currently_hashed = old_line.strip().startswith("#")
-                new_state = is_currently_hashed # If hashed -> enable (True), if unhashed -> disable (False)
-
-                if new_state: # Enable -> Unhash
-                    clean_cmd = re.sub(r"^\s*#+\s*", "", old_line)
-                    lines[found_idx] = f"    {clean_cmd}"
-                else: # Disable -> Hash out
-                    clean_cmd = re.sub(r"^\s*#*\s*", "", old_line)
-                    lines[found_idx] = f"    # {clean_cmd}"
+            if mode == "normal":
+                replacement = [
+                    "    BED_MESH_PROFILE LOAD=default",
+                    "    # BED_MESH_CALIBRATE",
+                ]
+            elif mode == "kamp":
+                replacement = [
+                    "    # BED_MESH_PROFILE LOAD=default",
+                    "    BED_MESH_CALIBRATE",
+                ]
             else:
-                # Line wasn't present at all -> insert it enabled
-                new_state = True
+                replacement = [
+                    "    # BED_MESH_PROFILE LOAD=default",
+                    "    # BED_MESH_CALIBRATE",
+                ]
+
+            if mesh_indices:
+                first_idx = mesh_indices[0]
+                for idx in reversed(mesh_indices):
+                    lines.pop(idx)
+                for offset, rep_line in enumerate(replacement):
+                    lines.insert(first_idx + offset, rep_line)
+            else:
                 insert_idx = -1
                 for i, line in enumerate(lines):
-                    if re.search(r"G1\s+Z15", line, re.IGNORECASE) or re.search(r"G28\s+Z", line, re.IGNORECASE):
+                    if re.search(r"G1\s+Z15", line, re.IGNORECASE) or re.search(r"G28\b", line, re.IGNORECASE):
                         insert_idx = i + 1
                 if insert_idx == -1:
-                    insert_idx = len(lines) - 2
-                lines.insert(insert_idx, "    BED_MESH_PROFILE LOAD=default")
+                    insert_idx = max(1, len(lines) - 1)
+                for offset, rep_line in enumerate(replacement):
+                    lines.insert(insert_idx + offset, rep_line)
 
             new_macro = "\n".join(lines)
             new_content = content[:m.start(1)] + new_macro + content[m.end(1):]
@@ -900,11 +939,18 @@ class MoonrakerClient(QtCore.QObject):
                 if saved_ok:
                     self.firmware_restart()
                 if on_done:
-                    on_done(new_state)
+                    on_done(mode)
 
             self.save_printer_cfg(new_content, on_done=_on_saved)
 
         self.get_printer_cfg(on_done=_on_cfg)
+
+    def toggle_start_gcode_mesh(self, on_done=None):
+        """Legacy helper: cycles normal -> kamp -> off."""
+        def _checked(cur_mode, _cfg):
+            nxt = {"normal": "kamp", "kamp": "off", "off": "normal"}.get(str(cur_mode), "normal")
+            self.set_start_gcode_mesh_mode(nxt, on_done=on_done)
+        self.check_start_gcode_mesh(on_done=_checked)
 
     def stepper_buzz(self, stepper: str, on_done=None):
         """Oscillate a given stepper motor (±1mm back and forth) using STEPPER_BUZZ."""

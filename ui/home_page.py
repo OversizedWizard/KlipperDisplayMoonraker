@@ -230,6 +230,154 @@ class AxisCoordCard(QtWidgets.QFrame):
         self._layout.setContentsMargins(m, _s(5, s), m, _s(5, s))
 
 
+
+
+class LevellingModeOverlay(QtWidgets.QFrame):
+    """Touch modal to select Bed Levelling mode: Normal (Saved Mesh), KAMP (Adaptive), or Off."""
+    mode_selected = Signal(str)
+    closed = Signal()
+
+    def __init__(self, current_mode: str = "off", scale: float = 1.0, parent=None):
+        super().__init__(parent)
+        self.scale = scale
+        self.current_mode = (current_mode or "off").lower()
+        self.setObjectName("LevellingModeOverlay")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("QFrame#LevellingModeOverlay { background: rgba(5, 10, 20, 0.88); }")
+        if parent:
+            self.setGeometry(parent.rect())
+
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QtWidgets.QFrame(self)
+        card.setObjectName("LevellingModeCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        card.setStyleSheet(f"""
+            QFrame#LevellingModeCard {{
+                background: #0F172A;
+                border: 2px solid #00E5FF;
+                border-radius: {_s(14, scale)}px;
+            }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+        lay = QtWidgets.QVBoxLayout(card)
+        lay.setContentsMargins(_s(18, scale), _s(14, scale), _s(18, scale), _s(14, scale))
+        lay.setSpacing(_s(10, scale))
+
+        hdr = QtWidgets.QHBoxLayout()
+        title = QtWidgets.QLabel("CHOOSE BED LEVELLING MODE")
+        title.setStyleSheet(f"color: #00E5FF; font-size: {_s(16, scale)}px; font-weight: 900; letter-spacing: 0.6px;")
+        hdr.addWidget(title)
+        hdr.addStretch(1)
+
+        close_btn = QtWidgets.QPushButton("✕")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setFixedSize(_s(34, scale), _s(34, scale))
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255, 255, 255, 0.08);
+                color: #CBD5E1;
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: {_s(17, scale)}px;
+                font-size: {_s(14, scale)}px;
+                font-weight: 800;
+            }}
+            QPushButton:hover {{ background: rgba(239, 68, 68, 0.4); color: #FFFFFF; }}
+        """)
+        close_btn.clicked.connect(self.close)
+        hdr.addWidget(close_btn)
+        lay.addLayout(hdr)
+
+        sub = QtWidgets.QLabel("Updates PRINT_START & KAMP_Settings.cfg in printer.cfg and restarts Klipper")
+        sub.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 600;")
+        lay.addWidget(sub)
+
+        modes = [
+            (
+                "normal",
+                "⊞  Normal (Saved Bed Mesh)",
+                "Loads your saved default mesh profile (BED_MESH_PROFILE LOAD=default)",
+                "#10B981",
+                "rgba(16, 185, 129, 0.16)",
+            ),
+            (
+                "kamp",
+                "⚡  KAMP (Adaptive Mesh)",
+                "Probes only the model print area before each print (KAMP BED_MESH_CALIBRATE)",
+                "#00E5FF",
+                "rgba(0, 229, 255, 0.16)",
+            ),
+            (
+                "off",
+                "✕  Levelling Off",
+                "Disables bed mesh in PRINT_START (runs with no mesh compensation)",
+                "#EF4444",
+                "rgba(239, 68, 68, 0.16)",
+            ),
+        ]
+
+        for m_key, m_title, m_desc, accent, bg_active in modes:
+            is_cur = (self.current_mode == m_key)
+            btn = QtWidgets.QPushButton()
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(_s(68, scale))
+            border_w = "2px" if is_cur else "1px"
+            border_col = accent if is_cur else "rgba(255, 255, 255, 0.14)"
+            bg_col = bg_active if is_cur else "rgba(30, 41, 59, 0.75)"
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {bg_col};
+                    border: {border_w} solid {border_col};
+                    border-radius: {_s(10, scale)}px;
+                    text-align: left;
+                }}
+                QPushButton:hover {{
+                    border: 2px solid {accent};
+                    background: {bg_active};
+                }}
+            """)
+            b_lay = QtWidgets.QVBoxLayout(btn)
+            b_lay.setContentsMargins(_s(14, scale), _s(8, scale), _s(14, scale), _s(8, scale))
+            b_lay.setSpacing(2)
+
+            top_r = QtWidgets.QHBoxLayout()
+            tl = QtWidgets.QLabel(m_title)
+            tl.setStyleSheet(f"color: {accent if is_cur else '#F8FAFC'}; font-size: {_s(14, scale)}px; font-weight: 900;")
+            tl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            top_r.addWidget(tl)
+            top_r.addStretch(1)
+            if is_cur:
+                badge = QtWidgets.QLabel("● ACTIVE")
+                badge.setStyleSheet(f"color: {accent}; font-size: {_s(11, scale)}px; font-weight: 900;")
+                badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+                top_r.addWidget(badge)
+            b_lay.addLayout(top_r)
+
+            dl = QtWidgets.QLabel(m_desc)
+            dl.setStyleSheet(f"color: #CBD5E1; font-size: {_s(11, scale)}px; font-weight: 600;")
+            dl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            b_lay.addWidget(dl)
+
+            btn.clicked.connect(lambda _c=False, k=m_key: self._pick(k))
+            lay.addWidget(btn)
+
+        card.setFixedWidth(_s(540, scale))
+        outer.addWidget(card)
+
+    def _pick(self, mode: str):
+        self.mode_selected.emit(mode)
+        self.close()
+
+    def close(self):
+        super().close()
+        self.closed.emit()
+
+    def mousePressEvent(self, event):
+        event.accept()
+
+
 class HomePage(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -562,16 +710,18 @@ class HomePage(QtWidgets.QWidget):
         else:
             QtCore.QTimer.singleShot(1000, self._check_mesh_config)
 
-    def _on_mesh_checked(self, is_enabled: bool, is_configured: bool):
+    def _on_mesh_checked(self, mode, is_configured: bool):
         main_win = self.window()
         mr = getattr(main_win, "moonraker", None)
-        if not is_configured and not is_enabled:
-            # If not yet connected / ready on reboot, retry
+        if not is_configured and mode == "off":
             if not mr or not mr.connected or mr.klippy_state != "ready":
                 QtCore.QTimer.singleShot(1500, self._check_mesh_config)
                 return
 
-        self._mesh_active = is_enabled
+        if isinstance(mode, bool):
+            mode = "normal" if mode else "off"
+        self._mesh_mode = str(mode or "off").lower()
+        self._mesh_active = (self._mesh_mode != "off")
         self._mesh_configured = is_configured
         self._update_mesh_button_ui()
 
@@ -581,7 +731,17 @@ class HomePage(QtWidgets.QWidget):
         self._check_mesh_config()
 
     def _on_toggle_bed_mesh(self):
-        """Toggle bed mesh in start gcode macro, save printer.cfg, and restart firmware."""
+        """Open the 3-mode Bed Levelling selector (Normal / KAMP / Off)."""
+        main_win = self.window()
+        s = getattr(self, "_scale", 1.0)
+        cur_mode = getattr(self, "_mesh_mode", "off")
+        overlay = LevellingModeOverlay(current_mode=cur_mode, scale=s, parent=main_win)
+        overlay.mode_selected.connect(self._apply_bed_mesh_mode)
+        overlay.show()
+        overlay.raise_()
+
+    def _apply_bed_mesh_mode(self, mode: str):
+        """Write chosen bed levelling mode ('normal', 'kamp', 'off') to printer.cfg and restart Klipper."""
         main_win = self.window()
         mr = getattr(main_win, "moonraker", None)
         if not mr:
@@ -601,15 +761,17 @@ class HomePage(QtWidgets.QWidget):
             }}
         """)
 
-        def _done(new_state: bool):
-            self._mesh_active = new_state
+        def _done(new_mode: str):
+            self._mesh_mode = str(new_mode or mode).lower()
+            self._mesh_active = (self._mesh_mode != "off")
             self._update_mesh_button_ui()
             QtCore.QTimer.singleShot(3500, self._check_mesh_config)
 
-        mr.toggle_start_gcode_mesh(on_done=_done)
+        mr.set_start_gcode_mesh_mode(mode, on_done=_done)
 
     def _update_mesh_button_ui(self):
         s = getattr(self, "_scale", 1.0)
+        mode = getattr(self, "_mesh_mode", "normal" if getattr(self, "_mesh_active", False) else "off")
         if not self._mesh_configured:
             self.btn_bed_mesh.setText("⊞  Bed Levelling (N/A)")
             self.btn_bed_mesh.setStyleSheet(f"""
@@ -623,8 +785,26 @@ class HomePage(QtWidgets.QWidget):
                     padding: 0 {_s(6, s)}px;
                 }}
             """)
-        elif self._mesh_active:
-            self.btn_bed_mesh.setText("⊞  Bed Levelling")
+        elif mode == "kamp":
+            self.btn_bed_mesh.setText("⚡  Levelling: KAMP")
+            self.btn_bed_mesh.setStyleSheet(f"""
+                QPushButton#BedMeshBtn {{
+                    background: rgba(0, 229, 255, 0.20);
+                    color: #00E5FF;
+                    border: 1.5px solid #00E5FF;
+                    border-radius: {_s(8, s)}px;
+                    font-size: {_s(12, s)}px;
+                    font-weight: 800;
+                    padding: 0 {_s(6, s)}px;
+                }}
+                QPushButton#BedMeshBtn:hover {{
+                    background: rgba(0, 229, 255, 0.35);
+                    border-color: #38BDF8;
+                    color: #FFFFFF;
+                }}
+            """)
+        elif mode == "normal":
+            self.btn_bed_mesh.setText("⊞  Levelling: Normal")
             self.btn_bed_mesh.setStyleSheet(f"""
                 QPushButton#BedMeshBtn {{
                     background: rgba(16, 185, 129, 0.20);
@@ -642,7 +822,7 @@ class HomePage(QtWidgets.QWidget):
                 }}
             """)
         else:
-            self.btn_bed_mesh.setText("⊞  Bed Levelling Off")
+            self.btn_bed_mesh.setText("⊞  Levelling: Off")
             self.btn_bed_mesh.setStyleSheet(f"""
                 QPushButton#BedMeshBtn {{
                     background: rgba(239, 68, 68, 0.16);
