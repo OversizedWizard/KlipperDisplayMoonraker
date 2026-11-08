@@ -871,7 +871,7 @@ class DualZTrimScreen(QtWidgets.QFrame):
         start_t = time.time()
         speed_f = int(self._speed * 60)
         hop = int(self._hop_z)
-        tare_step = "G4 P250\nLOAD_CELL_TARE\nG4 P100\n" if self._has_load_cell(mr) else ""
+        tare_step = mr.tare_gcode() if hasattr(mr, "tare_gcode") else ""
         home_prefix = "G28\n" if "xyz" not in (mr.homed_axes or "").lower() else ""
 
         cmd = (
@@ -960,7 +960,7 @@ class DualZTrimScreen(QtWidgets.QFrame):
         start_t = time.time()
         speed_f = int(self._speed * 60)
         hop = int(self._hop_z)
-        tare_step = "G4 P250\nLOAD_CELL_TARE\nG4 P100\n" if self._has_load_cell(mr) else ""
+        tare_step = mr.tare_gcode() if hasattr(mr, "tare_gcode") else ""
 
         cmd = (
             f"G90\n"

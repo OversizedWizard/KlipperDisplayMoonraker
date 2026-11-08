@@ -891,7 +891,8 @@ class BedScrewsScreen(QtWidgets.QFrame):
             if not has_lc and hasattr(mr, "objects"):
                 has_lc = any("load_cell" in str(o).lower() for o in mr.objects)
 
-        tare_step = "G4 P250\nLOAD_CELL_TARE\nG4 P100\n" if has_lc else ""
+        tare_step = mr.tare_gcode() if (mr and hasattr(mr, "tare_gcode")) else ""
+        has_lc = bool(tare_step)
 
         if needs_ref:
             self.status_lbl.setText(f"Taring probe and measuring Center Reference first ({base_sc['name']}), then Screw {sc['index']}...")
@@ -1056,11 +1057,8 @@ class BedScrewsScreen(QtWidgets.QFrame):
         start_t = time.time()
 
         has_lc = False
-        if mr:
-            if hasattr(mr, "has_load_cell"):
-                has_lc = mr.has_load_cell()
-            if not has_lc and hasattr(mr, "objects"):
-                has_lc = any("load_cell" in str(o).lower() for o in mr.objects)
+        if mr and hasattr(mr, "tare_gcode"):
+            has_lc = bool(mr.tare_gcode())
 
         speed_f = int(getattr(self, "_speed", 150.0) * 60)
         hop = int(getattr(self, "_hop_z", 10.0))
@@ -1069,7 +1067,7 @@ class BedScrewsScreen(QtWidgets.QFrame):
         ordered_screws = [base_sc] + [s for s in self._screws if s["index"] != base_sc["index"]]
 
         if has_lc:
-            tare_step = "G4 P250\nLOAD_CELL_TARE\nG4 P100\n"
+            tare_step = mr.tare_gcode()
             cmd_lines = ["G90", f"G1 Z{hop} F1200"]
             for s in ordered_screws:
                 cmd_lines.append(f"G90\nG1 X{s['x']:.2f} Y{s['y']:.2f} F{speed_f}")

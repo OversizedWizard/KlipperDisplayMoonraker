@@ -361,7 +361,8 @@ class MoonrakerClient(QtCore.QObject):
         Returns "" for endstop / BLTouch / inductive probes so nothing is sent to them.
         """
         try:
-            if self.has_load_cell():
+            # Only when the *probe* is a load cell (not BLTouch/endstop with a separate load cell sensor)
+            if "load_cell_probe" in (self.config or {}) or any("load_cell_probe" in str(o) for o in (self.objects or [])):
                 return "G4 P250\nLOAD_CELL_TARE\nG4 P100\n"
         except Exception:
             pass
