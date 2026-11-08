@@ -183,6 +183,7 @@ class PrintingPage(QtWidgets.QWidget):
 
         # Layer & Height tag
         self.layer_lbl = QtWidgets.QLabel("Layer: -- / --")
+        self.layer_lbl.setWordWrap(True)
         self.layer_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layer_lbl.setStyleSheet("color: #00E5FF; font-size: 13px; font-weight: 800;")
         left_layout.addWidget(self.layer_lbl)
@@ -208,7 +209,7 @@ class PrintingPage(QtWidgets.QWidget):
         # Row 1: Adjusted Z-Offset
         r1 = QtWidgets.QHBoxLayout()
         r1.setSpacing(4)
-        lbl_adj_title = QtWidgets.QLabel("Z Adjust Offset")
+        lbl_adj_title = QtWidgets.QLabel("Z Offset")
         lbl_adj_title.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 800;")
         self.adj_z_val_lbl = QtWidgets.QLabel("+0.000 mm")
         self.adj_z_val_lbl.setStyleSheet("color: #00E5FF; font-size: 13px; font-weight: 900; font-family: monospace;")
@@ -220,9 +221,9 @@ class PrintingPage(QtWidgets.QWidget):
         # Row 2: Baby Steps Added
         r2 = QtWidgets.QHBoxLayout()
         r2.setSpacing(4)
-        lbl_bs_title = QtWidgets.QLabel("Baby Steps Added")
+        lbl_bs_title = QtWidgets.QLabel("Baby Steps")
         lbl_bs_title.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 800;")
-        self.babystep_added_lbl = QtWidgets.QLabel("0  (+0.000 mm)")
+        self.babystep_added_lbl = QtWidgets.QLabel("0 (+0.00mm)")
         self.babystep_added_lbl.setStyleSheet("color: #34D399; font-size: 13px; font-weight: 900; font-family: monospace;")
         r2.addWidget(lbl_bs_title)
         r2.addStretch(1)
@@ -807,12 +808,12 @@ class PrintingPage(QtWidgets.QWidget):
                 self.adj_z_val_lbl.setText(f"{z_off:+.3f} mm")
         if hasattr(self, "babystep_added_lbl"):
             if abs(z_off) < 1e-4:
-                self.babystep_added_lbl.setText("0  (+0.000 mm)")
+                self.babystep_added_lbl.setText("0 (+0.00mm)")
                 self.babystep_added_lbl.setStyleSheet("color: #94A3B8; font-size: 13px; font-weight: 800; font-family: monospace;")
             else:
                 if step_count == 0:
                     step_count = round(z_off / 0.01)
-                self.babystep_added_lbl.setText(f"{step_count:+d}  ({z_off:+.3f} mm)")
+                self.babystep_added_lbl.setText(f"{step_count:+d} ({z_off:+.2f}mm)")
                 col = "#34D399" if z_off > 0 else "#FBBF24"
                 self.babystep_added_lbl.setStyleSheet(f"color: {col}; font-size: 13px; font-weight: 900; font-family: monospace;")
 
@@ -877,5 +878,6 @@ class PrintingPage(QtWidgets.QWidget):
         self.left_card.setFixedWidth(_s(240, s))
         sz = _s(168, s)
         self.thumb_lbl.setFixedSize(sz, sz)
+
 
 
