@@ -702,8 +702,8 @@ class FilesPage(QtWidgets.QWidget):
         # --- Content Area (Scrollable Stack) ---
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet(
-            "QScrollArea { background: transparent; border: none; }"
+        self.scroll.setStyleSheet("background: transparent; border: none;")
+        self.scroll.verticalScrollBar().setStyleSheet(
             "QScrollBar:vertical { background: rgba(255,255,255,0.06); width: 26px; margin: 0; border-radius: 13px; }"
             "QScrollBar::handle:vertical { background: rgba(0,229,255,0.55); border-radius: 11px; min-height: 60px; margin: 2px; }"
             "QScrollBar::handle:vertical:pressed { background: rgba(0,229,255,0.9); }"
