@@ -644,13 +644,15 @@ class ProbeAccuracyScreen(QtWidgets.QFrame):
             is_homed = all(a in str(homed).lower() for a in "xyz")
 
             def _proceed():
+                _mr = self._get_moonraker() if hasattr(self, "_get_moonraker") else None
+                _tare = _mr.tare_gcode() if (_mr and hasattr(_mr, "tare_gcode")) else ""
                 if not is_homed:
-                    cmd = f"G28\nPROBE_ACCURACY SAMPLES={self._samples_count}"
+                    cmd = f"G28\n{_tare}PROBE_ACCURACY SAMPLES={self._samples_count}"
                     self.start_btn.setText("Homing (G28)...")
                     self.verdict_badge.setText("HOMING (G28)")
                     self.status_lbl.setText(f"Axes not homed. Homing (G28) first, then testing accuracy...")
                 else:
-                    cmd = f"PROBE_ACCURACY SAMPLES={self._samples_count}"
+                    cmd = f"{_tare}PROBE_ACCURACY SAMPLES={self._samples_count}"
                     self.start_btn.setText("Probing Accuracy...")
                     self.verdict_badge.setText("TEST IN PROGRESS")
                     self.status_lbl.setText(f"Running PROBE_ACCURACY ({self._samples_count} samples)...")

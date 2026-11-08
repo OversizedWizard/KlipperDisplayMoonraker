@@ -355,6 +355,18 @@ class MoonrakerClient(QtCore.QObject):
             return False
         return any(k in cfg for k in ["load_cell", "load_cell_probe", "load_cell_sensor", "hx711", "ads1220"]) or any("load_cell" in o for o in objs)
 
+    def tare_gcode(self) -> str:
+        """Settle + LOAD_CELL_TARE lines, only when the probe is a load cell.
+
+        Returns "" for endstop / BLTouch / inductive probes so nothing is sent to them.
+        """
+        try:
+            if self.has_load_cell():
+                return "G4 P250\nLOAD_CELL_TARE\nG4 P100\n"
+        except Exception:
+            pass
+        return ""
+
     def is_delta(self) -> bool:
         """Returns True if kinematics is delta."""
         return str(self.config.get("printer", {}).get("kinematics", "")).lower() == "delta"

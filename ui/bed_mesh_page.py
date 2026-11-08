@@ -889,6 +889,9 @@ class BedMeshScreen(QtWidgets.QFrame):
 
     def _run_mesh(self, mr, name, homed):
         cmd = f"BED_MESH_CALIBRATE PROFILE={name}"
+        tare = mr.tare_gcode() if hasattr(mr, "tare_gcode") else ""
+        if tare:
+            cmd = tare + cmd  # load cell only: settle + tare before the mesh starts
         if not homed:
             cmd = "G28\n" + cmd
             self._set_status("Homing (G28) then probing bed mesh...", "#7DD3FC")
