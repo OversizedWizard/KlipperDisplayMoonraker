@@ -31,6 +31,9 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
         self._nozzle_temp = 25.0
         self._target_temp = 210.0
         self._sensor_triggered = False
+        # Live extruder velocity (mm/s) from the printer; None = unknown/offline -> fall back to stage logic
+        self._live_v = None
+        self._e_total = 0.0  # integrated filament travel (mm) since the move stage began
 
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(25)  # 40 FPS
@@ -44,7 +47,14 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
         self.update()
 
     def set_stage(self, stage: str):
+        if stage != self._stage and stage in ("extruding", "pulling", "gripping"):
+            self._e_total = 0.0
         self._stage = stage
+        self.update()
+
+    def set_feed_velocity(self, v):
+        """Live extruder velocity in mm/s (+ forward, - retract) or None when unknown."""
+        self._live_v = v
         self.update()
 
     def set_temp(self, current: float, target: float):
@@ -56,8 +66,28 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
         self._sensor_triggered = triggered
         self.update()
 
+    def _moving(self) -> float:
+        """Signed motion: live velocity when known, else stage-based default."""
+        if self._live_v is not None:
+            return self._live_v
+        if self._stage in ("gripping", "extruding"):
+            return 6.0
+        if self._stage == "pulling":
+            return -6.0
+        return 0.0
+
     def _step(self):
-        # Rotate drive gear when moving filament
+        if self._live_v is not None:
+            v = self._live_v
+            self._e_total += v * 0.025
+            if abs(v) > 0.2:
+                # gear rotation proportional to real feed speed (capped for readability)
+                step = max(-12.0, min(12.0, v * 1.2))
+                self._gear_angle = (self._gear_angle + step) % 360.0
+                self._flow_offset = (self._flow_offset + step * 0.6) % 24.0
+            self.update()
+            return
+        # Rotate drive gear when moving filament (offline fallback)
         if self._stage in ("gripping", "extruding"):
             self._gear_angle = (self._gear_angle + 4.0) % 360.0
             self._flow_offset = (self._flow_offset + 2.5) % 24.0
@@ -102,6 +132,11 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
             if self._stage == "waiting_sensor":
                 # Partial filament near top sensor
                 painter.drawLine(QtCore.QPointF(cx, 25), QtCore.QPointF(cx, cy - 40))
+            elif self._stage in ("gripping", "extruding") and self._live_v is not None:
+                # Strand tip follows the real amount fed by the extruder
+                frac = max(0.0, min(1.0, self._e_total / 65.0))
+                tip = (cy - 40) + frac * ((cy + 70) - (cy - 40))
+                painter.drawLine(QtCore.QPointF(cx, 25), QtCore.QPointF(cx, tip))
             elif self._stage in ("gripping", "extruding", "done"):
                 # Full strand reaching nozzle
                 painter.drawLine(QtCore.QPointF(cx, 25), QtCore.QPointF(cx, cy + 70))
@@ -109,7 +144,12 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
                 # Hovering strand
                 painter.drawLine(QtCore.QPointF(cx, 25), QtCore.QPointF(cx, cy))
         else: # Unload
-            if self._stage in ("pulling", "done"):
+            if self._stage == "pulling" and self._live_v is not None:
+                # Strand tip retracts by the real distance the extruder pulled back
+                frac = max(0.0, min(1.0, -self._e_total / 50.0))
+                tip = (cy + 60) - frac * ((cy + 60) - (cy - 25))
+                painter.drawLine(QtCore.QPointF(cx, 25), QtCore.QPointF(cx, tip))
+            elif self._stage in ("pulling", "done"):
                 # Retracted up
                 painter.drawLine(QtCore.QPointF(cx, 25), QtCore.QPointF(cx, cy - 25))
             else:
@@ -121,8 +161,9 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
         right_gx = cx + 22.0
         gy = cy - 10.0
 
-        self._draw_gear(painter, left_gx, gy, gear_r, self._gear_angle, is_active=(self._stage in ("gripping", "extruding", "pulling")))
-        self._draw_gear(painter, right_gx, gy, gear_r, -self._gear_angle, is_active=(self._stage in ("gripping", "extruding", "pulling")))
+        _active = abs(self._moving()) > 0.2 if self._live_v is not None else (self._stage in ("gripping", "extruding", "pulling"))
+        self._draw_gear(painter, left_gx, gy, gear_r, self._gear_angle, is_active=_active)
+        self._draw_gear(painter, right_gx, gy, gear_r, -self._gear_angle, is_active=_active)
 
         # 4. Filament Runout Sensor Module (Near top of filament tube)
         sensor_y = 45.0
@@ -190,7 +231,10 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
         painter.drawPolygon(nozzle_cone)
 
         # 6. Extruded Molten Filament Bead / Droplet
-        if self._stage in ("extruding", "done") and self._mode == "load":
+        _extruding_now = (self._live_v is not None and self._live_v > 0.2 and self._e_total > 55.0) or \
+                         (self._live_v is None and self._stage == "extruding") or \
+                         (self._live_v is not None and self._stage == "extruding" and self._e_total > 55.0)
+        if self._mode == "load" and (self._stage == "done" or (self._stage == "extruding" and _extruding_now)):
             bead_w = 5.0
             painter.setPen(QtGui.QPen(f_color, bead_w, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawLine(QtCore.QPointF(cx, nozzle_tip_y), QtCore.QPointF(cx, nozzle_tip_y + 18))
@@ -200,7 +244,13 @@ class ExtruderAnimationCanvas(QtWidgets.QWidget):
             painter.drawEllipse(QtCore.QPointF(cx, nozzle_tip_y + 20), 4.5, 4.5)
 
         # 7. Directional Arrows Overlay
-        if self._stage in ("gripping", "extruding"):
+        _mv = self._moving()
+        if self._live_v is not None:
+            if _mv > 0.2:
+                self._draw_arrow(painter, cx + 38, cy + 10, direction="down")
+            elif _mv < -0.2:
+                self._draw_arrow(painter, cx + 38, cy + 10, direction="up")
+        elif self._stage in ("gripping", "extruding"):
             self._draw_arrow(painter, cx + 38, cy + 10, direction="down")
         elif self._stage == "pulling":
             self._draw_arrow(painter, cx + 38, cy + 10, direction="up")

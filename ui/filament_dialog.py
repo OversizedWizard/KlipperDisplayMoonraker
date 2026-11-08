@@ -35,6 +35,10 @@ class FilamentActionDialog(QtWidgets.QFrame):
         self._has_sensor = False
         self._sensor_name = ""
         self._sensor_detected = False
+        self._sensor_now = False          # live sensor state (filament present right now)
+        self._live_v = None               # live extruder velocity mm/s from printer
+        self._poll_busy = False
+        self._prompt = None
         self._is_cancelled = False
         self._is_completed = False
 
@@ -399,7 +403,94 @@ class FilamentActionDialog(QtWidgets.QFrame):
             return
 
         self._read_cached_nozzle_temp()
+        self._poll_printer_live()
+        mr = self._get_moonraker()
+        live = bool(mr and mr.connected)
+        self.anim_canvas.set_feed_velocity(self._live_v if live else None)
+        if self._has_sensor and live:
+            self.anim_canvas.set_sensor_triggered(self._sensor_now)
         self._update_temp_ui_and_steps()
+
+    def _poll_printer_live(self):
+        """Background query of extruder velocity (for animation sync) and filament sensor state."""
+        mr = self._get_moonraker()
+        if not (mr and mr.connected) or self._poll_busy:
+            return
+        self._poll_busy = True
+        import threading, urllib.request, urllib.parse, json
+        host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
+        q = "motion_report=live_extruder_velocity"
+        if self._has_sensor and self._sensor_name:
+            q += "&" + urllib.parse.quote(self._sensor_name)
+        url = f"http://{host}/printer/objects/query?{q}"
+
+        def _worker():
+            try:
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    data = json.loads(resp.read().decode())
+                st = data.get("result", {}).get("status", {})
+                self._live_v = float(st.get("motion_report", {}).get("live_extruder_velocity", 0.0) or 0.0)
+                if self._has_sensor:
+                    self._sensor_now = bool(st.get(self._sensor_name, {}).get("filament_detected", False))
+                    if self._sensor_now:
+                        self._sensor_detected = True
+            except Exception:
+                pass
+            finally:
+                self._poll_busy = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    # ---- "push filament in" popup ----
+    def _show_sensor_prompt(self):
+        if self._prompt is None:
+            p = QtWidgets.QFrame(self)
+            p.setObjectName("SensorPrompt")
+            p.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            p.setStyleSheet("QFrame#SensorPrompt { background: rgba(5, 10, 20, 0.88); }")
+            lay = QtWidgets.QVBoxLayout(p)
+            lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            box = QtWidgets.QFrame()
+            box.setObjectName("SensorPromptBox")
+            box.setStyleSheet("QFrame#SensorPromptBox { background: #0F172A; border: 2px solid #38BDF8; border-radius: 14px; }"
+                              "QLabel { background: transparent; border: none; }")
+            bl = QtWidgets.QVBoxLayout(box)
+            bl.setContentsMargins(24, 18, 24, 18)
+            bl.setSpacing(10)
+            t = QtWidgets.QLabel("PUSH FILAMENT IN")
+            t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            t.setStyleSheet("color: #38BDF8; font-size: 22px; font-weight: 900; letter-spacing: 1px;")
+            m = QtWidgets.QLabel("Nozzle is hot. Push the filament into the extruder until the\n"
+                                 "filament sensor detects it. Loading starts automatically.")
+            m.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            m.setStyleSheet("color: #CBD5E1; font-size: 14px;")
+            self._prompt_state = QtWidgets.QLabel("● Waiting for sensor…")
+            self._prompt_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._prompt_state.setStyleSheet("color: #F59E0B; font-size: 15px; font-weight: 800;")
+            c = QtWidgets.QPushButton("Cancel")
+            c.setFixedHeight(40)
+            c.setStyleSheet("QPushButton { background: rgba(239,68,68,0.2); border: 1.5px solid #EF4444; color: #FCA5A5;"
+                            " font-weight: 800; font-size: 13px; border-radius: 10px; padding: 0 20px; }")
+            c.clicked.connect(self._on_cancel)
+            for w in (t, m, self._prompt_state, c):
+                bl.addWidget(w)
+            lay.addWidget(box)
+            self._prompt = p
+        self._prompt.setGeometry(self.rect())
+        self._prompt.show()
+        self._prompt.raise_()
+
+    def _hide_sensor_prompt(self):
+        if self._prompt is not None and self._prompt.isVisible():
+            self._prompt_state.setText("✔ Filament detected — loading…")
+            self._prompt_state.setStyleSheet("color: #10B981; font-size: 15px; font-weight: 800;")
+            self._prompt.hide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._prompt is not None and self._prompt.isVisible():
+            self._prompt.setGeometry(self.rect())
 
     def _update_temp_ui_and_steps(self):
         if self._is_cancelled:
@@ -441,8 +532,9 @@ class FilamentActionDialog(QtWidgets.QFrame):
                     self.step2_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-weight: 700;")
                     self.action_btn.setText("Waiting for Sensor...")
                     self.action_btn.setEnabled(False)
-                    self._check_sensor_trigger()
+                    self._show_sensor_prompt()
                 else:
+                    self._hide_sensor_prompt()
                     self.status_title.setText("STEP 2: FEEDING & EXTRUDING FILAMENT")
                     self.status_title.setStyleSheet("color: #10B981; font-size: 13px; font-weight: 800;")
                     self.instruction_text.setText("Extruder motor is gripping and feeding filament through nozzle. Use manual buttons below to purge more if needed.")
