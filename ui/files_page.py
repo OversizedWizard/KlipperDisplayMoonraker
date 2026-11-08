@@ -35,6 +35,58 @@ def format_size(bytes_val: int) -> str:
     return f"{bytes_val / (1024 * 1024):.1f} MB"
 
 
+_DRAG_THRESHOLD_PX = 10
+
+
+def _gpos(event):
+    try:
+        return event.globalPosition().toPoint()
+    except AttributeError:
+        return event.globalPos()
+
+
+def _parent_scroll_area(w):
+    p = w.parentWidget()
+    while p is not None:
+        if isinstance(p, QtWidgets.QScrollArea):
+            return p
+        p = p.parentWidget()
+    return None
+
+
+def _touch_press(w, event):
+    w._press_pos = _gpos(event)
+    w._last_pos = w._press_pos
+    w._dragged = False
+
+
+def _touch_move(w, event) -> bool:
+    """Drag-to-scroll: returns True if a press is active. Suppresses tap once moved."""
+    if getattr(w, "_press_pos", None) is None:
+        return False
+    pos = _gpos(event)
+    if not w._dragged:
+        if abs(pos.y() - w._press_pos.y()) > _DRAG_THRESHOLD_PX or abs(pos.x() - w._press_pos.x()) > _DRAG_THRESHOLD_PX:
+            w._dragged = True
+        else:
+            return True
+    area = _parent_scroll_area(w)
+    if area is not None:
+        bar = area.verticalScrollBar()
+        bar.setValue(bar.value() - (pos.y() - w._last_pos.y()))
+    w._last_pos = pos
+    return True
+
+
+def _touch_release(w) -> bool:
+    """Returns True if this release counts as a tap (no drag happened)."""
+    was_press = getattr(w, "_press_pos", None) is not None
+    dragged = getattr(w, "_dragged", False)
+    w._press_pos = None
+    w._dragged = False
+    return was_press and not dragged
+
+
 def _resolve_gcode_path(filename: str, current_dir: str) -> str:
     """Return path relative to gcodes root without duplicating directory prefixes."""
     fn = (filename or "").replace("gcodes/", "").lstrip("/")
@@ -400,10 +452,22 @@ class FileGridCard(QtWidgets.QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.item)
+            _touch_press(self, event)
             event.accept()
         else:
             super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not _touch_move(self, event):
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if _touch_release(self):
+                self.clicked.emit(self.item)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
 
 class FileListRow(QtWidgets.QFrame):
@@ -530,10 +594,22 @@ class FileListRow(QtWidgets.QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.item)
+            _touch_press(self, event)
             event.accept()
         else:
             super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not _touch_move(self, event):
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if _touch_release(self):
+                self.clicked.emit(self.item)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
 
 class FilesPage(QtWidgets.QWidget):
@@ -626,7 +702,14 @@ class FilesPage(QtWidgets.QWidget):
         # --- Content Area (Scrollable Stack) ---
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet("background: transparent; border: none;")
+        self.scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollBar:vertical { background: rgba(255,255,255,0.06); width: 26px; margin: 0; border-radius: 13px; }"
+            "QScrollBar::handle:vertical { background: rgba(0,229,255,0.55); border-radius: 11px; min-height: 60px; margin: 2px; }"
+            "QScrollBar::handle:vertical:pressed { background: rgba(0,229,255,0.9); }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
+            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"
+        )
 
         self.content_widget = QtWidgets.QWidget()
         self.content_layout = QtWidgets.QVBoxLayout(self.content_widget)

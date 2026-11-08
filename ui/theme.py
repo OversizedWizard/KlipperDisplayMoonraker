@@ -656,13 +656,13 @@ QScrollArea#CalScrollArea > QWidget > QWidget {{
 /* Scrollbar */
 QScrollBar:vertical {{
     background: transparent;
-    width: {px(8)};
+    width: {px(18)};
     margin: 0;
 }}
 QScrollBar::handle:vertical {{
-    background: rgba(255, 255, 255, 30);
-    border-radius: {px(4)};
-    min-height: {px(24)};
+    background: rgba(255, 255, 255, 60);
+    border-radius: {px(7)};
+    min-height: {px(48)};
 }}
 QScrollBar::handle:vertical:hover {{
     background: rgba(0, 229, 255, 120);

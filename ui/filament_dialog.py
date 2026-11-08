@@ -487,20 +487,28 @@ class FilamentActionDialog(QtWidgets.QFrame):
         """Query Moonraker for filament sensor switch state."""
         mr = self._get_moonraker()
         if mr and mr.connected and self._sensor_name:
-            import urllib.request, json
-            try:
-                host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
-                url = f"http://{host}/printer/objects/query?{self._sensor_name}"
-                req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                with urllib.request.urlopen(req, timeout=0.8) as resp:
-                    if resp.status == 200:
+            if getattr(self, "_sensor_query_busy", False):
+                return
+            self._sensor_query_busy = True
+            import threading, urllib.request, urllib.parse, json
+            host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
+            # Sensor names contain a space ("filament_switch_sensor foo") so must be URL-quoted
+            url = f"http://{host}/printer/objects/query?{urllib.parse.quote(self._sensor_name)}"
+
+            def _worker():
+                try:
+                    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                    with urllib.request.urlopen(req, timeout=2.0) as resp:
                         data = json.loads(resp.read().decode())
-                        status = data.get("result", {}).get("status", {}).get(self._sensor_name, {})
-                        if status.get("filament_detected", False):
-                            self._sensor_detected = True
-                            self.anim_canvas.set_sensor_triggered(True)
-            except Exception:
-                pass
+                    status = data.get("result", {}).get("status", {}).get(self._sensor_name, {})
+                    if status.get("filament_detected", False):
+                        self._sensor_detected = True
+                except Exception:
+                    pass
+                finally:
+                    self._sensor_query_busy = False  # next poll tick picks up _sensor_detected
+
+            threading.Thread(target=_worker, daemon=True).start()
         else:
             # In offline or unconfigured mode, auto-advance after nozzle heated
             self._sensor_detected = True
