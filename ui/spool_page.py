@@ -1,4 +1,4 @@
-"""Spool Page: Filament management, AMS/MMU detection, spool selection, type, color, and automatic preset temperatures."""
+"""Spool Page: Clean filament spool showcase, tap-to-edit settings modal, load/unload, and manual extrude."""
 
 import json
 import os
@@ -6,8 +6,10 @@ from . import icons
 from .filament_dialog import FilamentActionDialog
 from .qt import QtWidgets, QtCore, QtGui, Qt, Signal
 
+
 def _s(v: float, s: float) -> int:
     return max(1, round(v * s))
+
 
 CONFIG_STORE_PATH = os.path.expanduser("~/.klipper_display_spools.json")
 
@@ -80,6 +82,130 @@ DEFAULT_SPOOLS = {
 }
 
 
+class SpoolGraphicWidget(QtWidgets.QWidget):
+    """Custom vector filament spool illustration tinted with the active filament colour."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._color = QtGui.QColor("#3B82F6")
+        self._type_text = "PLA"
+        self.setMinimumSize(130, 130)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def set_spool(self, hex_color: str, f_type: str):
+        self._color = QtGui.QColor(hex_color or "#3B82F6")
+        self._type_text = f_type or "PLA"
+        self.update()
+
+    def paintEvent(self, event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        w, h = float(self.width()), float(self.height())
+        cx, cy = w * 0.5, h * 0.5
+        r_outer = min(w, h) * 0.44
+        r_fila = r_outer * 0.83
+        r_hub = r_outer * 0.42
+        r_hole = r_outer * 0.22
+
+        # Outer ambient glow in filament color
+        glow = QtGui.QRadialGradient(QtCore.QPointF(cx, cy), r_outer * 1.12)
+        c_glow = QtGui.QColor(self._color)
+        c_glow.setAlpha(70)
+        glow.setColorAt(0.6, c_glow)
+        glow.setColorAt(1.0, QtGui.QColor(0, 0, 0, 0))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QtGui.QBrush(glow))
+        p.drawEllipse(QtCore.QPointF(cx, cy), r_outer * 1.12, r_outer * 1.12)
+
+        # Dark polycarbonate spool flange
+        flange_grad = QtGui.QLinearGradient(cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer)
+        flange_grad.setColorAt(0.0, QtGui.QColor("#334155"))
+        flange_grad.setColorAt(1.0, QtGui.QColor("#0F172A"))
+        p.setBrush(QtGui.QBrush(flange_grad))
+        p.setPen(QtGui.QPen(QtGui.QColor(148, 163, 184, 140), 2.0))
+        p.drawEllipse(QtCore.QPointF(cx, cy), r_outer, r_outer)
+
+        # Wound filament body with 3D radial shading & concentric strand rings
+        f_grad = QtGui.QRadialGradient(QtCore.QPointF(cx - r_fila * 0.25, cy - r_fila * 0.25), r_fila * 1.2)
+        f_grad.setColorAt(0.0, self._color.lighter(135))
+        f_grad.setColorAt(0.55, self._color)
+        f_grad.setColorAt(1.0, self._color.darker(155))
+        p.setBrush(QtGui.QBrush(f_grad))
+        p.setPen(QtGui.QPen(self._color.lighter(150), 1.5))
+        p.drawEllipse(QtCore.QPointF(cx, cy), r_fila, r_fila)
+
+        # Concentric filament wind lines
+        ring_pen = QtGui.QPen(QtGui.QColor(255, 255, 255, 42), 1.0)
+        p.setPen(ring_pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        for frac in (0.52, 0.62, 0.72):
+            rr = r_outer * frac
+            p.drawEllipse(QtCore.QPointF(cx, cy), rr, rr)
+
+        # Filament loose strand leading out from bottom-right of spool
+        strand_path = QtGui.QPainterPath()
+        strand_path.moveTo(cx + r_fila * 0.68, cy + r_fila * 0.68)
+        strand_path.cubicTo(
+            cx + r_outer * 0.98, cy + r_outer * 0.45,
+            cx + r_outer * 1.05, cy + r_outer * 0.85,
+            cx + r_outer * 0.88, cy + r_outer * 1.02,
+        )
+        p.setPen(QtGui.QPen(self._color.lighter(120), 3.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawPath(strand_path)
+
+        # Flange cutout spokes (subtle translucent overlays)
+        import math
+        p.setPen(QtGui.QPen(QtGui.QColor(15, 23, 42, 130), 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        for k in range(6):
+            ang = k * math.pi / 3.0 + 0.3
+            x1 = cx + math.cos(ang) * (r_hub + 2)
+            y1 = cy + math.sin(ang) * (r_hub + 2)
+            x2 = cx + math.cos(ang) * (r_outer - 3)
+            y2 = cy + math.sin(ang) * (r_outer - 3)
+            p.drawLine(QtCore.QPointF(x1, y1), QtCore.QPointF(x2, y2))
+
+        # Inner hub ring
+        p.setBrush(QtGui.QColor("#1E293B"))
+        p.setPen(QtGui.QPen(QtGui.QColor(148, 163, 184, 150), 1.8))
+        p.drawEllipse(QtCore.QPointF(cx, cy), r_hub, r_hub)
+
+        # Center bore hole
+        p.setBrush(QtGui.QColor("#0B0F19"))
+        p.setPen(QtGui.QPen(QtGui.QColor(0, 229, 255, 130), 1.5))
+        p.drawEllipse(QtCore.QPointF(cx, cy), r_hole, r_hole)
+
+        # Material label inside center bore
+        f = p.font()
+        f.setPointSizeF(max(7.5, r_hole * 0.52))
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QtGui.QColor("#FFFFFF"))
+        p.drawText(
+            QtCore.QRectF(cx - r_hub, cy - r_hole, r_hub * 2.0, r_hole * 2.0),
+            Qt.AlignmentFlag.AlignCenter,
+            self._type_text,
+        )
+        p.end()
+
+
+class ClickableSpoolCard(QtWidgets.QFrame):
+    """Interactive Spool Showcase Card — emits clicked() when touched anywhere."""
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class SpoolSelectorButton(QtWidgets.QPushButton):
     """Spool slot selection pill showing slot number, color swatch, filament type, and active indicator."""
 
@@ -96,21 +222,19 @@ class SpoolSelectorButton(QtWidgets.QPushButton):
     def update_data(self, spool_data: dict, is_active: bool, scale: float = 1.0):
         self.is_active = is_active
         self.setChecked(is_active)
-        color = spool_data.get("color", "#3B82F6")
         f_type = spool_data.get("type", "PLA")
         name = spool_data.get("name", f"Spool {self.slot_id}")
 
-        self.setText(f"  ● {name} ({f_type})")
-        
-        # Style based on active state
+        self.setText(f"  \u25CF {name} ({f_type})")
+
         b_color = "#00E5FF" if is_active else "rgba(255, 255, 255, 0.12)"
         bg = "rgba(0, 229, 255, 0.15)" if is_active else "rgba(30, 41, 59, 0.7)"
         text_col = "#00E5FF" if is_active else "#E2E8F0"
         fw = "800" if is_active else "600"
-        
+
         radius = _s(10, scale)
-        pad_v = _s(7, scale)
-        pad_h = _s(12, scale)
+        pad_v = _s(6, scale)
+        pad_h = _s(10, scale)
         font_sz = _s(12, scale)
 
         self.setStyleSheet(f"""
@@ -132,7 +256,7 @@ class SpoolSelectorButton(QtWidgets.QPushButton):
 
 
 class SpoolPage(QtWidgets.QWidget):
-    """Spool Screen Interface supporting standalone Spool 1 or multi-spool AMS/MMU."""
+    """Neat, non-scrolling Spool Screen with visual spool card and tap-to-open Settings modal."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -153,25 +277,12 @@ class SpoolPage(QtWidgets.QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        # Touch-friendly Scroll Area
-        self.scroll = QtWidgets.QScrollArea()
-        self.scroll.setObjectName("CalScrollArea")
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-
-        self.container = QtWidgets.QWidget()
-        self.container.setObjectName("CalContainer")
-        self.container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.vbox = QtWidgets.QVBoxLayout(self.container)
-
+        main_layout.setContentsMargins(14, 10, 14, 10)
+        main_layout.setSpacing(8)
+        self.vbox = main_layout
         self.headers = []
 
-        # --- Section 1: AMS / Multi-Spool Selector Bar ---
+        # --- Top AMS / Multi-Spool Bar (only visible when AMS/MMU hardware detected) ---
         self.ams_header = QtWidgets.QLabel("AMS / MMU SPOOL SELECTION")
         self.ams_header.setObjectName("SettingsSecHeader")
         self.ams_header.setVisible(False)
@@ -183,7 +294,7 @@ class SpoolPage(QtWidgets.QWidget):
         self.selector_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.selector_box.setVisible(False)
         self.sel_layout = QtWidgets.QHBoxLayout(self.selector_box)
-        self.sel_layout.setContentsMargins(10, 8, 10, 8)
+        self.sel_layout.setContentsMargins(8, 6, 8, 6)
         self.sel_layout.setSpacing(8)
 
         self.slot_buttons = []
@@ -193,297 +304,478 @@ class SpoolPage(QtWidgets.QWidget):
             self.slot_buttons.append(btn)
 
         self.vbox.addWidget(self.selector_box)
-        self.vbox.addSpacing(6)
 
-        # --- Section 2: Active Spool Detail & Configuration ---
-        self.config_header = QtWidgets.QLabel("ACTIVE SPOOL CONFIGURATION")
+        # --- Section Header Row: Active Spool + Live Nozzle Badge ---
+        top_hdr = QtWidgets.QHBoxLayout()
+        self.config_header = QtWidgets.QLabel("ACTIVE FILAMENT SPOOL")
         self.config_header.setObjectName("SettingsSecHeader")
-        self.vbox.addWidget(self.config_header)
+        top_hdr.addWidget(self.config_header)
         self.headers.append(self.config_header)
+        top_hdr.addStretch(1)
 
-        # Grid container for Spool Visual Preview + Filament Config Form
-        self.detail_frame = QtWidgets.QFrame()
-        self.detail_frame.setObjectName("CalibrateCard")
-        self.detail_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.grid = QtWidgets.QGridLayout(self.detail_frame)
-        self.grid.setContentsMargins(14, 12, 14, 12)
-        self.grid.setHorizontalSpacing(14)
-        self.grid.setVerticalSpacing(10)
-
-        # Left Column: Spool Preview Card
-        self.preview_card = QtWidgets.QFrame()
-        self.preview_card.setStyleSheet("background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;")
-        prev_lay = QtWidgets.QVBoxLayout(self.preview_card)
-        prev_lay.setContentsMargins(12, 10, 12, 10)
-        prev_lay.setSpacing(6)
-
-        self.spool_icon_lbl = QtWidgets.QLabel()
-        self.spool_icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.spool_icon_lbl.setPixmap(icons.pixmap("spool", 64))
-        prev_lay.addWidget(self.spool_icon_lbl, 0, Qt.AlignmentFlag.AlignCenter)
-
-        self.spool_title_lbl = QtWidgets.QLabel("Spool 1")
-        self.spool_title_lbl.setStyleSheet("color: #FFFFFF; font-size: 15px; font-weight: 800; text-align: center;")
-        self.spool_title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        prev_lay.addWidget(self.spool_title_lbl)
-
-        # Color Swatch pill
-        self.color_swatch = QtWidgets.QLabel("● Blue")
-        self.color_swatch.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.color_swatch.setStyleSheet("background: #3B82F6; color: #FFFFFF; font-size: 12px; font-weight: 800; border-radius: 8px; padding: 4px 10px;")
-        prev_lay.addWidget(self.color_swatch)
-
-        # Type & Temps Summary badge
-        self.summary_badge = QtWidgets.QLabel("PLA  •  210°C / 60°C")
-        self.summary_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.summary_badge.setStyleSheet("color: #00E5FF; font-size: 12px; font-weight: 700; background: rgba(0, 229, 255, 0.1); border: 1px solid rgba(0, 229, 255, 0.3); border-radius: 6px; padding: 4px;")
-        prev_lay.addWidget(self.summary_badge)
-        prev_lay.addStretch(1)
-
-        self.grid.addWidget(self.preview_card, 0, 0, 4, 1)
-
-        # Right Column: Controls
-        # Row 0: Filament Type Preset Selector
-        type_lbl = QtWidgets.QLabel("Filament Type:")
-        type_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 700;")
-        self.grid.addWidget(type_lbl, 0, 1)
-
-        self.type_combo = QtWidgets.QComboBox()
-        self.type_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.type_combo.addItems(list(FILAMENT_PRESETS.keys()))
-        self.type_combo.setStyleSheet("""
-            QComboBox {
-                background: #1E293B;
-                border: 1px solid #475569;
-                border-radius: 8px;
-                color: #FFFFFF;
-                font-weight: 700;
-                font-size: 13px;
-                padding: 6px 12px;
-                min-height: 24px;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 24px;
-            }
-            QComboBox QAbstractItemView {
-                background: #0F172A;
-                border: 1px solid #00E5FF;
-                color: #FFFFFF;
-                selection-background-color: #00E5FF;
-                selection-color: #000000;
-            }
-        """)
-        self.type_combo.currentTextChanged.connect(self._on_type_changed)
-        self.grid.addWidget(self.type_combo, 0, 2)
-
-        # Row 1: Color Palette Grid
-        col_lbl = QtWidgets.QLabel("Filament Color:")
-        col_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 700;")
-        self.grid.addWidget(col_lbl, 1, 1)
-
-        color_container = QtWidgets.QWidget()
-        self.color_grid = QtWidgets.QGridLayout(color_container)
-        self.color_grid.setContentsMargins(0, 0, 0, 0)
-        self.color_grid.setSpacing(4)
-        self.color_btns = []
-
-        for idx, (hex_code, col_name) in enumerate(PALETTE_COLORS):
-            c_btn = QtWidgets.QPushButton()
-            c_btn.setFixedSize(24, 24)
-            c_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            c_btn.setToolTip(col_name)
-            c_btn.setProperty("hex", hex_code)
-            c_btn.setProperty("name", col_name)
-            c_btn.setStyleSheet(f"background-color: {hex_code}; border: 1.5px solid rgba(255,255,255,0.3); border-radius: 12px;")
-            c_btn.clicked.connect(lambda _checked=False, h=hex_code, n=col_name: self._on_color_picked(h, n))
-            self.color_grid.addWidget(c_btn, idx // 8, idx % 8)
-            self.color_btns.append(c_btn)
-
-        self.grid.addWidget(color_container, 1, 2)
-
-        # Row 2: Standard Extruder Nozzle Temperature (with auto-fill & step adjustment)
-        nozzle_lbl = QtWidgets.QLabel("Nozzle Temp (°C):")
-        nozzle_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 700;")
-        self.grid.addWidget(nozzle_lbl, 2, 1)
-
-        noz_box = QtWidgets.QHBoxLayout()
-        noz_box.setSpacing(6)
-
-        self.noz_down_btn = QtWidgets.QPushButton("-5")
-        self.noz_down_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.noz_down_btn.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px; padding: 4px 10px;")
-        self.noz_down_btn.clicked.connect(lambda: self._adj_temp("nozzle", -5))
-        noz_box.addWidget(self.noz_down_btn)
-
-        self.noz_val_lbl = QtWidgets.QLabel("210 °C")
-        self.noz_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.noz_val_lbl.setStyleSheet("color: #FF5A5F; font-size: 14px; font-weight: 800; min-width: 60px;")
-        noz_box.addWidget(self.noz_val_lbl)
-
-        self.noz_up_btn = QtWidgets.QPushButton("+5")
-        self.noz_up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.noz_up_btn.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px; padding: 4px 10px;")
-        self.noz_up_btn.clicked.connect(lambda: self._adj_temp("nozzle", +5))
-        noz_box.addWidget(self.noz_up_btn)
-
-        noz_box.addStretch(1)
-        self.grid.addLayout(noz_box, 2, 2)
-
-        # Row 3: Standard Heated Bed Temperature (with auto-fill & step adjustment)
-        bed_lbl = QtWidgets.QLabel("Bed Temp (°C):")
-        bed_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 700;")
-        self.grid.addWidget(bed_lbl, 3, 1)
-
-        bed_box = QtWidgets.QHBoxLayout()
-        bed_box.setSpacing(6)
-
-        self.bed_down_btn = QtWidgets.QPushButton("-5")
-        self.bed_down_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.bed_down_btn.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px; padding: 4px 10px;")
-        self.bed_down_btn.clicked.connect(lambda: self._adj_temp("bed", -5))
-        bed_box.addWidget(self.bed_down_btn)
-
-        self.bed_val_lbl = QtWidgets.QLabel("60 °C")
-        self.bed_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.bed_val_lbl.setStyleSheet("color: #00E5FF; font-size: 14px; font-weight: 800; min-width: 60px;")
-        bed_box.addWidget(self.bed_val_lbl)
-
-        self.bed_up_btn = QtWidgets.QPushButton("+5")
-        self.bed_up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.bed_up_btn.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px; padding: 4px 10px;")
-        self.bed_up_btn.clicked.connect(lambda: self._adj_temp("bed", +5))
-        bed_box.addWidget(self.bed_up_btn)
-
-        bed_box.addStretch(1)
-        self.grid.addLayout(bed_box, 3, 2)
-
-        self.grid.setColumnStretch(0, 0)
-        self.grid.setColumnStretch(1, 0)
-        self.grid.setColumnStretch(2, 1)
-
-        self.vbox.addWidget(self.detail_frame)
-        self.vbox.addSpacing(8)
-
-        # --- Section 3: Quick Action Load, Unload & Manual Extrude/Retract ---
-        ops_hdr_row = QtWidgets.QHBoxLayout()
-        self.actions_header = QtWidgets.QLabel("FILAMENT OPERATIONS & MANUAL EXTRUDE")
-        self.actions_header.setObjectName("SettingsSecHeader")
-        ops_hdr_row.addWidget(self.actions_header)
-        self.headers.append(self.actions_header)
-        ops_hdr_row.addStretch(1)
-
-        self.live_temp_badge = QtWidgets.QLabel("● Nozzle: --.-°C")
+        self.live_temp_badge = QtWidgets.QLabel("\u25CF Nozzle: --.-\u00B0C")
         self.live_temp_badge.setStyleSheet(
             "color: #38BDF8; background: rgba(56, 189, 248, 0.14); border: 1px solid rgba(56, 189, 248, 0.45); "
-            "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 8px;"
+            "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 3px 10px;"
         )
-        ops_hdr_row.addWidget(self.live_temp_badge)
-        self.vbox.addLayout(ops_hdr_row)
+        top_hdr.addWidget(self.live_temp_badge)
+        self.vbox.addLayout(top_hdr)
 
-        btn_row = QtWidgets.QHBoxLayout()
-        btn_row.setSpacing(10)
+        # --- Main 2-Column Split: Left = Touchable Active Spool Card, Right = Filament Actions & Extrude ---
+        body_row = QtWidgets.QHBoxLayout()
+        body_row.setSpacing(12)
 
-        # 1. Load Filament (LOAD_FILAMENT)
-        self.load_btn = QtWidgets.QPushButton("📥  Load Filament")
+        # LEFT: Touchable Active Spool Card
+        self.spool_card = ClickableSpoolCard(self)
+        self.spool_card.setObjectName("SpoolShowcaseCard")
+        self.spool_card.clicked.connect(self._open_settings_modal)
+        self.spool_card.setStyleSheet("""
+            QFrame#SpoolShowcaseCard {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #162032, stop:1 #0F172A);
+                border: 1.5px solid rgba(0, 229, 255, 0.45);
+                border-radius: 14px;
+            }
+            QFrame#SpoolShowcaseCard:hover {
+                border: 1.5px solid #00E5FF;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1E293B, stop:1 #111C2D);
+            }
+            QFrame#SpoolShowcaseCard QLabel {
+                background: transparent;
+                border: none;
+            }
+        """)
+        sc_lay = QtWidgets.QVBoxLayout(self.spool_card)
+        sc_lay.setContentsMargins(16, 12, 16, 12)
+        sc_lay.setSpacing(8)
+
+        # Top row inside Spool Card: Spool Graphic + Info Column
+        sc_top = QtWidgets.QHBoxLayout()
+        sc_top.setSpacing(14)
+
+        self.spool_graphic = SpoolGraphicWidget(self.spool_card)
+        sc_top.addWidget(self.spool_graphic, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        info_col = QtWidgets.QVBoxLayout()
+        info_col.setSpacing(6)
+        info_col.addStretch(1)
+
+        self.spool_title_lbl = QtWidgets.QLabel("Spool 1")
+        self.spool_title_lbl.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: 900;")
+        info_col.addWidget(self.spool_title_lbl)
+
+        # Material + Color pills row
+        pills_row = QtWidgets.QHBoxLayout()
+        pills_row.setSpacing(6)
+        self.type_pill = QtWidgets.QLabel("PLA")
+        self.type_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.type_pill.setStyleSheet(
+            "background: rgba(0, 229, 255, 0.16); color: #00E5FF; border: 1px solid rgba(0, 229, 255, 0.45); "
+            "font-size: 13px; font-weight: 900; border-radius: 7px; padding: 3px 10px;"
+        )
+        pills_row.addWidget(self.type_pill)
+
+        self.color_swatch = QtWidgets.QLabel("\u25CF Blue")
+        self.color_swatch.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.color_swatch.setStyleSheet(
+            "background: #3B82F6; color: #FFFFFF; font-size: 12px; font-weight: 800; "
+            "border-radius: 7px; padding: 3px 10px;"
+        )
+        pills_row.addWidget(self.color_swatch)
+        pills_row.addStretch(1)
+        info_col.addLayout(pills_row)
+
+        # Temperature summary boxes
+        temps_grid = QtWidgets.QHBoxLayout()
+        temps_grid.setSpacing(8)
+
+        self.noz_stat_box = QtWidgets.QFrame()
+        self.noz_stat_box.setStyleSheet(
+            "QFrame { background: rgba(255, 90, 95, 0.10); border: 1px solid rgba(255, 90, 95, 0.35); border-radius: 8px; } QLabel { border: none; background: transparent; }"
+        )
+        nb_l = QtWidgets.QVBoxLayout(self.noz_stat_box)
+        nb_l.setContentsMargins(8, 4, 8, 4)
+        nb_l.setSpacing(1)
+        nb_k = QtWidgets.QLabel("NOZZLE PRESET")
+        nb_k.setStyleSheet("color: #94A3B8; font-size: 9px; font-weight: 800;")
+        self.card_noz_lbl = QtWidgets.QLabel("210 \u00B0C")
+        self.card_noz_lbl.setStyleSheet("color: #FF5A5F; font-size: 15px; font-weight: 900;")
+        nb_l.addWidget(nb_k)
+        nb_l.addWidget(self.card_noz_lbl)
+        temps_grid.addWidget(self.noz_stat_box, 1)
+
+        self.bed_stat_box = QtWidgets.QFrame()
+        self.bed_stat_box.setStyleSheet(
+            "QFrame { background: rgba(0, 229, 255, 0.10); border: 1px solid rgba(0, 229, 255, 0.35); border-radius: 8px; } QLabel { border: none; background: transparent; }"
+        )
+        bb_l = QtWidgets.QVBoxLayout(self.bed_stat_box)
+        bb_l.setContentsMargins(8, 4, 8, 4)
+        bb_l.setSpacing(1)
+        bb_k = QtWidgets.QLabel("BED PRESET")
+        bb_k.setStyleSheet("color: #94A3B8; font-size: 9px; font-weight: 800;")
+        self.card_bed_lbl = QtWidgets.QLabel("60 \u00B0C")
+        self.card_bed_lbl.setStyleSheet("color: #00E5FF; font-size: 15px; font-weight: 900;")
+        bb_l.addWidget(bb_k)
+        bb_l.addWidget(self.card_bed_lbl)
+        temps_grid.addWidget(self.bed_stat_box, 1)
+
+        info_col.addLayout(temps_grid)
+        info_col.addStretch(1)
+        sc_top.addLayout(info_col, 1)
+        sc_lay.addLayout(sc_top, 1)
+
+        # Bottom callout bar inside Spool Card ("Tap Card to Configure Spool Settings")
+        self.tap_hint_bar = QtWidgets.QFrame()
+        self.tap_hint_bar.setStyleSheet(
+            "QFrame { background: rgba(0, 229, 255, 0.10); border: 1px dashed rgba(0, 229, 255, 0.45); border-radius: 8px; } QLabel { border: none; background: transparent; }"
+        )
+        th_lay = QtWidgets.QHBoxLayout(self.tap_hint_bar)
+        th_lay.setContentsMargins(10, 6, 10, 6)
+        self.tap_hint_lbl = QtWidgets.QLabel("\u2699  Tap Spool Card to Change Material, Colour & Temperatures")
+        self.tap_hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.tap_hint_lbl.setStyleSheet("color: #7DD3FC; font-size: 11px; font-weight: 800;")
+        th_lay.addWidget(self.tap_hint_lbl)
+        sc_lay.addWidget(self.tap_hint_bar)
+
+        body_row.addWidget(self.spool_card, 11)
+
+        # RIGHT: Filament Operations + Manual Extrude / Retract Card
+        right_col = QtWidgets.QVBoxLayout()
+        right_col.setSpacing(10)
+
+        # Card 1: Load / Unload / Preheat
+        ops_card = QtWidgets.QFrame()
+        ops_card.setObjectName("CalibrateCard")
+        ops_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        ops_card.setStyleSheet("""
+            QFrame#CalibrateCard {
+                background: rgba(21, 29, 42, 0.85);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: 14px;
+            }
+            QFrame#CalibrateCard QLabel { background: transparent; border: none; }
+        """)
+        ops_lay = QtWidgets.QVBoxLayout(ops_card)
+        ops_lay.setContentsMargins(12, 10, 12, 10)
+        ops_lay.setSpacing(8)
+
+        ops_title = QtWidgets.QLabel("FILAMENT ACTIONS")
+        ops_title.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800; letter-spacing: 0.8px;")
+        ops_lay.addWidget(ops_title)
+
+        lu_row = QtWidgets.QHBoxLayout()
+        lu_row.setSpacing(8)
+
+        self.load_btn = QtWidgets.QPushButton("\U0001F4E5  Load")
         self.load_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.load_btn.setMinimumHeight(42)
         self.load_btn.clicked.connect(self._on_load_filament)
-        btn_row.addWidget(self.load_btn, 1)
+        lu_row.addWidget(self.load_btn, 1)
 
-        # 2. Unload Filament (UNLOAD_FILAMENT)
-        self.unload_btn = QtWidgets.QPushButton("📤  Unload Filament")
+        self.unload_btn = QtWidgets.QPushButton("\U0001F4E4  Unload")
         self.unload_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.unload_btn.setMinimumHeight(42)
         self.unload_btn.clicked.connect(self._on_unload_filament)
-        btn_row.addWidget(self.unload_btn, 1)
+        lu_row.addWidget(self.unload_btn, 1)
 
-        # 3. Preheat to Spool Temperature
-        self.preheat_btn = QtWidgets.QPushButton("🔥  Heat Nozzle")
+        ops_lay.addLayout(lu_row)
+
+        self.preheat_btn = QtWidgets.QPushButton("\U0001F525  Preheat Nozzle to Spool Temp")
         self.preheat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.preheat_btn.setMinimumHeight(36)
         self.preheat_btn.clicked.connect(self._on_heat_spool_nozzle)
-        btn_row.addWidget(self.preheat_btn, 1)
+        ops_lay.addWidget(self.preheat_btn)
 
-        self.vbox.addLayout(btn_row)
+        right_col.addWidget(ops_card)
 
-        # Manual Extrude & Retract Bar
+        # Card 2: Manual Extrude & Retract
         ext_card = QtWidgets.QFrame()
         ext_card.setObjectName("CalibrateCard")
         ext_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        ext_lay = QtWidgets.QHBoxLayout(ext_card)
-        ext_lay.setContentsMargins(10, 6, 10, 6)
+        ext_card.setStyleSheet("""
+            QFrame#CalibrateCard {
+                background: rgba(21, 29, 42, 0.85);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: 14px;
+            }
+            QFrame#CalibrateCard QLabel { background: transparent; border: none; }
+        """)
+        ext_lay = QtWidgets.QVBoxLayout(ext_card)
+        ext_lay.setContentsMargins(12, 10, 12, 10)
         ext_lay.setSpacing(8)
 
-        dist_lbl = QtWidgets.QLabel("Length:")
-        dist_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 800;")
-        ext_lay.addWidget(dist_lbl)
+        ext_hdr = QtWidgets.QHBoxLayout()
+        ext_title = QtWidgets.QLabel("MANUAL EXTRUDE / RETRACT")
+        ext_title.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800; letter-spacing: 0.8px;")
+        ext_hdr.addWidget(ext_title)
+        ext_hdr.addStretch(1)
+        ext_lay.addLayout(ext_hdr)
 
+        dist_row = QtWidgets.QHBoxLayout()
+        dist_row.setSpacing(6)
         self.dist_btns = {}
         for d in (5, 10, 25, 50):
             b = QtWidgets.QPushButton(f"{d}mm")
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(32)
+            b.setFixedHeight(30)
             b.clicked.connect(lambda _c=False, val=float(d): self._set_extrude_dist(val))
-            ext_lay.addWidget(b)
+            dist_row.addWidget(b, 1)
             self.dist_btns[float(d)] = b
+        ext_lay.addLayout(dist_row)
 
-        ext_lay.addSpacing(4)
+        er_row = QtWidgets.QHBoxLayout()
+        er_row.setSpacing(8)
 
-        self.btn_extrude = QtWidgets.QPushButton("⬇  Extrude")
+        self.btn_extrude = QtWidgets.QPushButton("\u2B07  Extrude +10mm")
         self.btn_extrude.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_extrude.setFixedHeight(34)
+        self.btn_extrude.setMinimumHeight(38)
         self.btn_extrude.clicked.connect(lambda: self._on_manual_extrude(+self._extrude_dist))
-        ext_lay.addWidget(self.btn_extrude, 1)
+        er_row.addWidget(self.btn_extrude, 1)
 
-        self.btn_retract = QtWidgets.QPushButton("⬆  Retract")
+        self.btn_retract = QtWidgets.QPushButton("\u2B06  Retract -10mm")
         self.btn_retract.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_retract.setFixedHeight(34)
+        self.btn_retract.setMinimumHeight(38)
         self.btn_retract.clicked.connect(lambda: self._on_manual_extrude(-self._extrude_dist))
-        ext_lay.addWidget(self.btn_retract, 1)
+        er_row.addWidget(self.btn_retract, 1)
 
-        self.vbox.addWidget(ext_card)
+        ext_lay.addLayout(er_row)
+        right_col.addWidget(ext_card)
 
-        self.status_lbl = QtWidgets.QLabel("")
-        self.status_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-weight: 700; margin-top: 2px;")
+        body_row.addLayout(right_col, 10)
+        self.vbox.addLayout(body_row, 1)
+
+        # Bottom Status Line
+        self.status_lbl = QtWidgets.QLabel("Touch the Spool card to configure filament type, colour, and preset temperatures.")
+        self.status_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 700;")
         self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.vbox.addWidget(self.status_lbl)
 
-        self.vbox.addStretch(1)
-        self.scroll.setWidget(self.container)
-        main_layout.addWidget(self.scroll)
+        # --- Build In-Window Spool Settings Modal Overlay (hidden by default) ---
+        self._build_settings_modal()
 
         # Initialize UI with Spool 1
         self._set_extrude_dist(10.0)
         self._refresh_spool_display()
 
+    def _build_settings_modal(self):
+        """Create the touch modal overlay that appears when the Spool Card is tapped."""
+        self.settings_overlay = QtWidgets.QFrame(self)
+        self.settings_overlay.setObjectName("SpoolSettingsOverlay")
+        self.settings_overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.settings_overlay.setStyleSheet("QFrame#SpoolSettingsOverlay { background: rgba(6, 10, 19, 0.86); }")
+        self.settings_overlay.hide()
+
+        ov_lay = QtWidgets.QVBoxLayout(self.settings_overlay)
+        ov_lay.setContentsMargins(28, 16, 28, 16)
+        ov_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.modal_card = QtWidgets.QFrame(self.settings_overlay)
+        self.modal_card.setObjectName("SpoolSettingsCard")
+        self.modal_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.modal_card.setMinimumWidth(560)
+        self.modal_card.setMaximumWidth(740)
+        self.modal_card.setStyleSheet("""
+            QFrame#SpoolSettingsCard {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #162032, stop:1 #0B0F19);
+                border: 1.5px solid #00E5FF;
+                border-radius: 16px;
+            }
+            QFrame#SpoolSettingsCard QLabel {
+                background: transparent;
+                border: none;
+            }
+        """)
+        mc_lay = QtWidgets.QVBoxLayout(self.modal_card)
+        mc_lay.setContentsMargins(18, 14, 18, 14)
+        mc_lay.setSpacing(10)
+
+        # Modal Header
+        m_hdr = QtWidgets.QHBoxLayout()
+        self.modal_title = QtWidgets.QLabel("\u2699  SPOOL 1 SETTINGS")
+        self.modal_title.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: 900; letter-spacing: 0.5px;")
+        m_hdr.addWidget(self.modal_title)
+        m_hdr.addStretch(1)
+
+        self.modal_summary = QtWidgets.QLabel("PLA  \u2022  210\u00B0C / 60\u00B0C")
+        self.modal_summary.setStyleSheet(
+            "color: #00E5FF; background: rgba(0, 229, 255, 0.14); border: 1px solid rgba(0, 229, 255, 0.4); "
+            "border-radius: 6px; font-size: 12px; font-weight: 800; padding: 3px 10px;"
+        )
+        m_hdr.addWidget(self.modal_summary)
+
+        close_x = QtWidgets.QPushButton("\u2715")
+        close_x.setFixedSize(30, 30)
+        close_x.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_x.setStyleSheet(
+            "QPushButton { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); "
+            "border-radius: 15px; color: #CBD5E1; font-size: 14px; font-weight: 800; }"
+            "QPushButton:pressed { background: rgba(239,68,68,0.35); color: #FFFFFF; }"
+        )
+        close_x.clicked.connect(self._close_settings_modal)
+        m_hdr.addWidget(close_x)
+        mc_lay.addLayout(m_hdr)
+
+        # 1. Filament Type Preset Pills (2 rows of 5 touch buttons)
+        type_hdr = QtWidgets.QLabel("FILAMENT MATERIAL (AUTO-SETS NOZZLE & BED TEMPS)")
+        type_hdr.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800; letter-spacing: 0.6px;")
+        mc_lay.addWidget(type_hdr)
+
+        type_grid = QtWidgets.QGridLayout()
+        type_grid.setSpacing(6)
+        self.type_btns = {}
+        for idx, f_type in enumerate(FILAMENT_PRESETS.keys()):
+            tb = QtWidgets.QPushButton(f_type)
+            tb.setCursor(Qt.CursorShape.PointingHandCursor)
+            tb.setFixedHeight(32)
+            tb.clicked.connect(lambda _c=False, t=f_type: self._on_type_changed(t))
+            type_grid.addWidget(tb, idx // 5, idx % 5)
+            self.type_btns[f_type] = tb
+        mc_lay.addLayout(type_grid)
+
+        # 2. Filament Color Swatches (2 rows of 8)
+        col_hdr = QtWidgets.QLabel("FILAMENT COLOUR")
+        col_hdr.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800; letter-spacing: 0.6px;")
+        mc_lay.addWidget(col_hdr)
+
+        self.color_grid = QtWidgets.QGridLayout()
+        self.color_grid.setSpacing(6)
+        self.color_btns = []
+        for idx, (hex_code, col_name) in enumerate(PALETTE_COLORS):
+            c_btn = QtWidgets.QPushButton()
+            c_btn.setFixedSize(30, 30)
+            c_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            c_btn.setToolTip(col_name)
+            c_btn.setProperty("hex", hex_code)
+            c_btn.setProperty("name", col_name)
+            c_btn.clicked.connect(lambda _checked=False, h=hex_code, n=col_name: self._on_color_picked(h, n))
+            self.color_grid.addWidget(c_btn, idx // 8, idx % 8)
+            self.color_btns.append(c_btn)
+        mc_lay.addLayout(self.color_grid)
+
+        # 3. Nozzle & Bed Preset Temperature Steppers side-by-side
+        temp_row = QtWidgets.QHBoxLayout()
+        temp_row.setSpacing(12)
+
+        # Nozzle stepper box
+        noz_frame = QtWidgets.QFrame()
+        noz_frame.setStyleSheet(
+            "QFrame { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 90, 95, 0.35); border-radius: 10px; } QLabel { border: none; background: transparent; }"
+        )
+        nf_lay = QtWidgets.QHBoxLayout(noz_frame)
+        nf_lay.setContentsMargins(10, 6, 10, 6)
+        nf_lbl = QtWidgets.QLabel("Nozzle:")
+        nf_lbl.setStyleSheet("color: #CBD5E1; font-size: 12px; font-weight: 800;")
+        nf_lay.addWidget(nf_lbl)
+
+        self.noz_down_btn = QtWidgets.QPushButton("-5\u00B0")
+        self.noz_down_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.noz_down_btn.setFixedSize(44, 30)
+        self.noz_down_btn.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px;")
+        self.noz_down_btn.clicked.connect(lambda: self._adj_temp("nozzle", -5))
+        nf_lay.addWidget(self.noz_down_btn)
+
+        self.noz_val_lbl = QtWidgets.QLabel("210 \u00B0C")
+        self.noz_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.noz_val_lbl.setStyleSheet("color: #FF5A5F; font-size: 15px; font-weight: 900; min-width: 64px;")
+        nf_lay.addWidget(self.noz_val_lbl, 1)
+
+        self.noz_up_btn = QtWidgets.QPushButton("+5\u00B0")
+        self.noz_up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.noz_up_btn.setFixedSize(44, 30)
+        self.noz_up_btn.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px;")
+        self.noz_up_btn.clicked.connect(lambda: self._adj_temp("nozzle", +5))
+        nf_lay.addWidget(self.noz_up_btn)
+        temp_row.addWidget(noz_frame, 1)
+
+        # Bed stepper box
+        bed_frame = QtWidgets.QFrame()
+        bed_frame.setStyleSheet(
+            "QFrame { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(0, 229, 255, 0.35); border-radius: 10px; } QLabel { border: none; background: transparent; }"
+        )
+        bf_lay = QtWidgets.QHBoxLayout(bed_frame)
+        bf_lay.setContentsMargins(10, 6, 10, 6)
+        bf_lbl = QtWidgets.QLabel("Bed:")
+        bf_lbl.setStyleSheet("color: #CBD5E1; font-size: 12px; font-weight: 800;")
+        bf_lay.addWidget(bf_lbl)
+
+        self.bed_down_btn = QtWidgets.QPushButton("-5\u00B0")
+        self.bed_down_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bed_down_btn.setFixedSize(44, 30)
+        self.bed_down_btn.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px;")
+        self.bed_down_btn.clicked.connect(lambda: self._adj_temp("bed", -5))
+        bf_lay.addWidget(self.bed_down_btn)
+
+        self.bed_val_lbl = QtWidgets.QLabel("60 \u00B0C")
+        self.bed_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.bed_val_lbl.setStyleSheet("color: #00E5FF; font-size: 15px; font-weight: 900; min-width: 64px;")
+        bf_lay.addWidget(self.bed_val_lbl, 1)
+
+        self.bed_up_btn = QtWidgets.QPushButton("+5\u00B0")
+        self.bed_up_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bed_up_btn.setFixedSize(44, 30)
+        self.bed_up_btn.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px;")
+        self.bed_up_btn.clicked.connect(lambda: self._adj_temp("bed", +5))
+        bf_lay.addWidget(self.bed_up_btn)
+        temp_row.addWidget(bed_frame, 1)
+
+        mc_lay.addLayout(temp_row)
+
+        # Done button row
+        done_row = QtWidgets.QHBoxLayout()
+        done_row.addStretch(1)
+        done_btn = QtWidgets.QPushButton("\u2713  Save && Close")
+        done_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        done_btn.setFixedHeight(36)
+        done_btn.setMinimumWidth(160)
+        done_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284C7, stop:1 #00E5FF);
+                border: 1px solid rgba(255,255,255,0.35);
+                border-radius: 9px;
+                color: #FFFFFF;
+                font-size: 13px;
+                font-weight: 900;
+                padding: 0 20px;
+            }
+            QPushButton:pressed { background: #0284C7; }
+        """)
+        done_btn.clicked.connect(self._close_settings_modal)
+        done_row.addWidget(done_btn)
+        mc_lay.addLayout(done_row)
+
+        ov_lay.addWidget(self.modal_card)
+
+    def _open_settings_modal(self):
+        self._refresh_spool_display()
+        self.settings_overlay.setGeometry(self.rect())
+        self.settings_overlay.show()
+        self.settings_overlay.raise_()
+
+    def _close_settings_modal(self):
+        self.settings_overlay.hide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "settings_overlay") and self.settings_overlay.isVisible():
+            self.settings_overlay.setGeometry(self.rect())
+
     def update_config(self, config: dict, objects: list = None):
         """Detect AMS/MMU multi-material hardware (MMU, ERCF, TradRack, Box, AMS) or default to standalone Spool 1."""
         cfg = config or {}
         objs = objects or []
-        
+
         cfg_keys = [str(k).lower().strip() for k in cfg.keys()]
         obj_names = [str(o).lower().strip() for o in objs]
 
-        # Multi-material / AMS signature sections and object names
-        # Check explicit section keys (not arbitrary parameter substrings like 'params')
         has_ams = False
-
-        # 1. Check for MMU / ERCF / Happy Hare / TradRack sections
-        ams_section_prefixes = [
-            "mmu", "ercf", "tradrack", "happy_hare", "ams", "bambu_ams",
-            "anycubic_ace", "filament_box", "filament_switch_sensor"
-        ]
-        
         for k in cfg_keys:
-            # Check if any config section starts with or equals an AMS/MMU system
             words = k.replace("_", " ").split()
             if any(p in words or k.startswith(p) for p in ["mmu", "ercf", "tradrack", "happy_hare", "bambu_ams", "anycubic_ace"]):
                 has_ams = True
                 break
-            # Multiple extruders (e.g. extruder1, extruder2)
             if k.startswith("extruder") and k != "extruder":
                 has_ams = True
                 break
 
-        # 2. Check registered Klipper objects
         if not has_ams:
             for o in obj_names:
                 if any(o.startswith(p) or f" {p}" in o for p in ["mmu", "ercf", "tradrack", "happy_hare", "bambu_ams", "anycubic_ace"]):
@@ -495,14 +787,12 @@ class SpoolPage(QtWidgets.QWidget):
 
         self._has_ams = has_ams
         if has_ams:
-            self.ams_header.setText("AMS / MMU DETECTED — SELECT ACTIVE SPOOL")
+            self.ams_header.setText("AMS / MMU DETECTED \u2014 SELECT ACTIVE SPOOL")
             self.ams_header.setVisible(True)
             self.selector_box.setVisible(True)
             for btn in self.slot_buttons:
                 btn.setVisible(True)
         else:
-            self.ams_header.setText("FILAMENT SPOOL")
-            # In single spool setup without AMS, hide the multi-spool selector row and default to Spool 1
             self._active_slot = 1
             self.selector_box.setVisible(False)
             self.ams_header.setVisible(False)
@@ -517,12 +807,10 @@ class SpoolPage(QtWidgets.QWidget):
         spool_key = f"spool_{self._active_slot}"
         data = self._spools.get(spool_key, DEFAULT_SPOOLS["spool_1"])
 
-        # Update slot buttons
         for btn in self.slot_buttons:
             s_data = self._spools.get(f"spool_{btn.slot_id}", DEFAULT_SPOOLS["spool_1"])
             btn.update_data(s_data, is_active=(btn.slot_id == self._active_slot), scale=self._scale)
 
-        # Update detail fields
         name = data.get("name", f"Spool {self._active_slot}")
         f_type = data.get("type", "PLA")
         color = data.get("color", "#3B82F6")
@@ -530,47 +818,73 @@ class SpoolPage(QtWidgets.QWidget):
         bed_temp = int(data.get("bed_temp", 60))
 
         self.spool_title_lbl.setText(name)
-        
-        # Find color name
+        self.type_pill.setText(f_type)
+        self.spool_graphic.set_spool(color, f_type)
+
         col_name = "Custom"
         for hex_code, c_name in PALETTE_COLORS:
             if hex_code.lower() == color.lower():
                 col_name = c_name
                 break
-        
-        self.color_swatch.setText(f"● {col_name}")
-        self.color_swatch.setStyleSheet(f"background: {color}; color: {'#000000' if color in ('#FFFFFF', '#FDE047', '#EAB308') else '#FFFFFF'}; font-size: 12px; font-weight: 800; border-radius: 8px; padding: 4px 10px;")
-        
-        self.summary_badge.setText(f"{f_type}  •  {noz_temp}°C / {bed_temp}°C")
-        self.noz_val_lbl.setText(f"{noz_temp} °C")
-        self.bed_val_lbl.setText(f"{bed_temp} °C")
 
-        # Update combo box without triggering signal loop
-        self.type_combo.blockSignals(True)
-        idx = self.type_combo.findText(f_type)
-        if idx >= 0:
-            self.type_combo.setCurrentIndex(idx)
-        self.type_combo.blockSignals(False)
+        text_fg = "#000000" if color.upper() in ("#FFFFFF", "#FDE047", "#EAB308") else "#FFFFFF"
+        self.color_swatch.setText(f"\u25CF {col_name}")
+        self.color_swatch.setStyleSheet(
+            f"background: {color}; color: {text_fg}; font-size: 12px; font-weight: 800; "
+            f"border-radius: 7px; padding: 3px 10px;"
+        )
+
+        self.card_noz_lbl.setText(f"{noz_temp} \u00B0C")
+        self.card_bed_lbl.setText(f"{bed_temp} \u00B0C")
+        self.noz_val_lbl.setText(f"{noz_temp} \u00B0C")
+        self.bed_val_lbl.setText(f"{bed_temp} \u00B0C")
+
+        if hasattr(self, "modal_title"):
+            self.modal_title.setText(f"\u2699  {name.upper()} SETTINGS")
+            self.modal_summary.setText(f"{f_type}  \u2022  {col_name}  \u2022  {noz_temp}\u00B0C / {bed_temp}\u00B0C")
+
+        # Highlight active filament type pill inside settings modal
+        if hasattr(self, "type_btns"):
+            for t_key, tb in self.type_btns.items():
+                if t_key == f_type:
+                    tb.setStyleSheet(
+                        "QPushButton { background: #00E5FF; color: #0B0F19; border: 1.5px solid #FFFFFF; "
+                        "border-radius: 7px; font-size: 12px; font-weight: 900; }"
+                    )
+                else:
+                    tb.setStyleSheet(
+                        "QPushButton { background: #1E293B; color: #CBD5E1; border: 1px solid rgba(255,255,255,0.16); "
+                        "border-radius: 7px; font-size: 12px; font-weight: 700; }"
+                        "QPushButton:hover { border-color: #38BDF8; color: #FFFFFF; }"
+                    )
+
+        # Highlight active color button inside settings modal
+        if hasattr(self, "color_btns"):
+            for c_btn in self.color_btns:
+                hex_c = str(c_btn.property("hex") or "")
+                is_sel = hex_c.lower() == color.lower()
+                border = "3px solid #FFFFFF" if is_sel else "1.5px solid rgba(255,255,255,0.28)"
+                c_btn.setStyleSheet(f"background-color: {hex_c}; border: {border}; border-radius: 15px;")
 
     def _on_type_changed(self, f_type: str):
         """Auto-fill standard nozzle and bed temperatures for the selected filament type."""
         preset = FILAMENT_PRESETS.get(f_type, {"nozzle": 210, "bed": 60})
         spool_key = f"spool_{self._active_slot}"
-        
+
         self._spools[spool_key]["type"] = f_type
         self._spools[spool_key]["nozzle_temp"] = preset["nozzle"]
         self._spools[spool_key]["bed_temp"] = preset["bed"]
-        
+
         self._save_spools()
         self._refresh_spool_display()
-        self.status_lbl.setText(f"Auto-filled {f_type} standard temps: {preset['nozzle']}°C Nozzle / {preset['bed']}°C Bed")
+        self.status_lbl.setText(f"Auto-filled {f_type} standard temps: {preset['nozzle']}\u00B0C Nozzle / {preset['bed']}\u00B0C Bed")
 
     def _on_color_picked(self, hex_code: str, col_name: str):
         spool_key = f"spool_{self._active_slot}"
         self._spools[spool_key]["color"] = hex_code
         self._save_spools()
         self._refresh_spool_display()
-        self.status_lbl.setText(f"Spool {self._active_slot} color set to {col_name}")
+        self.status_lbl.setText(f"Spool {self._active_slot} colour set to {col_name}")
 
     def _adj_temp(self, kind: str, delta: int):
         spool_key = f"spool_{self._active_slot}"
@@ -593,23 +907,23 @@ class SpoolPage(QtWidgets.QWidget):
         self._live_bed_tgt = float(b_tgt)
 
         if n_cur >= 180.0:
-            tgt_str = f" / {n_tgt:.0f}°C" if n_tgt > 0 else ""
-            self.live_temp_badge.setText(f"🔥 Nozzle: {n_cur:.1f}°C{tgt_str} (HOT)")
+            tgt_str = f" / {n_tgt:.0f}\u00B0C" if n_tgt > 0 else ""
+            self.live_temp_badge.setText(f"\U0001F525 Nozzle: {n_cur:.1f}\u00B0C{tgt_str} (HOT)")
             self.live_temp_badge.setStyleSheet(
                 "color: #FFFFFF; background: #EF4444; border: 1px solid #F87171; "
-                "border-radius: 6px; font-size: 11px; font-weight: 900; padding: 2px 8px;"
+                "border-radius: 6px; font-size: 11px; font-weight: 900; padding: 3px 10px;"
             )
         elif n_tgt > 0:
-            self.live_temp_badge.setText(f"🔥 Heating Nozzle: {n_cur:.1f}°C → {n_tgt:.0f}°C")
+            self.live_temp_badge.setText(f"\U0001F525 Heating Nozzle: {n_cur:.1f}\u00B0C \u2192 {n_tgt:.0f}\u00B0C")
             self.live_temp_badge.setStyleSheet(
                 "color: #FBBF24; background: rgba(245, 158, 11, 0.18); border: 1px solid #F59E0B; "
-                "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 8px;"
+                "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 3px 10px;"
             )
         else:
-            self.live_temp_badge.setText(f"● Nozzle: {n_cur:.1f}°C (Idle)")
+            self.live_temp_badge.setText(f"\u25CF Nozzle: {n_cur:.1f}\u00B0C (Idle)")
             self.live_temp_badge.setStyleSheet(
                 "color: #38BDF8; background: rgba(56, 189, 248, 0.14); border: 1px solid rgba(56, 189, 248, 0.45); "
-                "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 2px 8px;"
+                "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 3px 10px;"
             )
 
     def _set_extrude_dist(self, dist: float):
@@ -620,17 +934,17 @@ class SpoolPage(QtWidgets.QWidget):
             if active:
                 btn.setStyleSheet(
                     f"background: #00E5FF; color: #0F172A; border: 1px solid #00E5FF; "
-                    f"border-radius: {_s(6, s)}px; font-size: {_s(11, s)}px; font-weight: 900; padding: 0 {_s(8, s)}px;"
+                    f"border-radius: {_s(6, s)}px; font-size: {_s(11, s)}px; font-weight: 900; padding: 0 {_s(6, s)}px;"
                 )
             else:
                 btn.setStyleSheet(
                     f"background: #1E293B; color: #CBD5E1; border: 1px solid rgba(255,255,255,0.16); "
-                    f"border-radius: {_s(6, s)}px; font-size: {_s(11, s)}px; font-weight: 700; padding: 0 {_s(8, s)}px;"
+                    f"border-radius: {_s(6, s)}px; font-size: {_s(11, s)}px; font-weight: 700; padding: 0 {_s(6, s)}px;"
                 )
         if hasattr(self, "btn_extrude"):
-            self.btn_extrude.setText(f"⬇  Extrude +{int(dist)}mm")
+            self.btn_extrude.setText(f"\u2B07  Extrude +{int(dist)}mm")
         if hasattr(self, "btn_retract"):
-            self.btn_retract.setText(f"⬆  Retract -{int(dist)}mm")
+            self.btn_retract.setText(f"\u2B06  Retract -{int(dist)}mm")
 
     def _get_moonraker(self):
         mr = getattr(self, "moonraker", None)
@@ -646,9 +960,9 @@ class SpoolPage(QtWidgets.QWidget):
         mr = self._get_moonraker()
         if mr and mr.connected:
             mr.set_temperature("extruder", noz_temp)
-            self.status_lbl.setText(f"🔥 Heating nozzle to {noz_temp:.0f}°C ({data.get('type', 'PLA')})...")
+            self.status_lbl.setText(f"\U0001F525 Heating nozzle to {noz_temp:.0f}\u00B0C ({data.get('type', 'PLA')})...")
         else:
-            self.status_lbl.setText(f"Target set: {noz_temp:.0f}°C")
+            self.status_lbl.setText(f"Target set: {noz_temp:.0f}\u00B0C")
 
     def _on_manual_extrude(self, length_mm: float):
         mr = self._get_moonraker()
@@ -663,18 +977,18 @@ class SpoolPage(QtWidgets.QWidget):
             if cur_noz < 170.0 and self._live_nozzle_tgt < 170.0:
                 mr.set_temperature("extruder", target_noz)
                 self.status_lbl.setText(
-                    f"🔥 Heating nozzle to {target_noz:.0f}°C & {action_lbl.lower()} {length_mm:+.0f}mm..."
+                    f"\U0001F525 Heating nozzle to {target_noz:.0f}\u00B0C & {action_lbl.lower()} {length_mm:+.0f}mm..."
                 )
             else:
-                self.status_lbl.setText(f"⚙ {action_lbl} {abs(length_mm):.0f}mm at {cur_noz:.1f}°C...")
+                self.status_lbl.setText(f"\u2699 {action_lbl} {abs(length_mm):.0f}mm at {cur_noz:.1f}\u00B0C...")
 
             def _done(ok: bool):
                 if ok:
                     self.status_lbl.setText(
-                        f"✓ Manual {'extrude' if length_mm > 0 else 'retract'} ({length_mm:+.0f}mm) complete"
+                        f"\u2713 Manual {'extrude' if length_mm > 0 else 'retract'} ({length_mm:+.0f}mm) complete"
                     )
                 else:
-                    self.status_lbl.setText("⚠ Extrude rejected by Klipper (wait for nozzle to heat up)")
+                    self.status_lbl.setText("\u26A0 Extrude rejected by Klipper (wait for nozzle to heat up)")
 
             mr.extrude(length_mm, speed_mm_s=spd, on_done=_done)
         else:
@@ -686,7 +1000,7 @@ class SpoolPage(QtWidgets.QWidget):
         main_win = self.window()
         view = FilamentActionDialog(mode="load", spool_data=data, scale=self._scale, parent=main_win)
         if hasattr(main_win, "open_sub_screen"):
-            main_win.open_sub_screen(view, title=f"Load Filament — Spool {self._active_slot}", return_page="spool")
+            main_win.open_sub_screen(view, title=f"Load Filament \u2014 Spool {self._active_slot}", return_page="spool")
         else:
             view.show()
 
@@ -696,7 +1010,7 @@ class SpoolPage(QtWidgets.QWidget):
         main_win = self.window()
         view = FilamentActionDialog(mode="unload", spool_data=data, scale=self._scale, parent=main_win)
         if hasattr(main_win, "open_sub_screen"):
-            main_win.open_sub_screen(view, title=f"Unload Filament — Spool {self._active_slot}", return_page="spool")
+            main_win.open_sub_screen(view, title=f"Unload Filament \u2014 Spool {self._active_slot}", return_page="spool")
         else:
             view.show()
 
@@ -721,20 +1035,41 @@ class SpoolPage(QtWidgets.QWidget):
         self._scale = s
         m = _s(12, s)
         self.vbox.setContentsMargins(m, _s(8, s), m, _s(8, s))
-        self.vbox.setSpacing(_s(6, s))
+        self.vbox.setSpacing(_s(8, s))
 
         for h in self.headers:
-            h.setStyleSheet(f"font-size: {_s(11, s)}px; font-weight: 800; letter-spacing: 0.8px; color: #94A3B8; margin-top: {_s(2, s)}px; margin-bottom: {_s(1, s)}px;")
+            h.setStyleSheet(
+                f"font-size: {_s(11, s)}px; font-weight: 800; letter-spacing: 0.8px; color: #94A3B8;"
+            )
 
         for btn in self.slot_buttons:
             s_data = self._spools.get(f"spool_{btn.slot_id}", DEFAULT_SPOOLS["spool_1"])
             btn.update_data(s_data, is_active=(btn.slot_id == self._active_slot), scale=s)
 
-        self.spool_icon_lbl.setPixmap(icons.pixmap("spool", _s(52, s)))
-        self.load_btn.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10B981, stop:1 #059669); border: 1px solid #34D399; color: #FFFFFF; font-weight: 800; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: {_s(8, s)}px {_s(12, s)}px;")
-        self.unload_btn.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #475569, stop:1 #334155); border: 1px solid #64748B; color: #FFFFFF; font-weight: 800; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: {_s(8, s)}px {_s(12, s)}px;")
-        self.preheat_btn.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F97316, stop:1 #EA580C); border: 1px solid #FB923C; color: #FFFFFF; font-weight: 800; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: {_s(8, s)}px {_s(12, s)}px;")
-        self.btn_extrude.setStyleSheet(f"background: rgba(16, 185, 129, 0.22); border: 1.5px solid #10B981; color: #34D399; font-weight: 900; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: 0 {_s(12, s)}px;")
-        self.btn_retract.setStyleSheet(f"background: rgba(56, 189, 248, 0.20); border: 1.5px solid #38BDF8; color: #7DD3FC; font-weight: 900; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: 0 {_s(12, s)}px;")
-        self._set_extrude_dist(self._extrude_dist)
+        g_sz = _s(144, s)
+        self.spool_graphic.setFixedSize(g_sz, g_sz)
 
+        self.load_btn.setStyleSheet(
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10B981, stop:1 #059669); "
+            f"border: 1px solid #34D399; color: #FFFFFF; font-weight: 800; font-size: {_s(13, s)}px; "
+            f"border-radius: {_s(9, s)}px; padding: {_s(8, s)}px {_s(12, s)}px;"
+        )
+        self.unload_btn.setStyleSheet(
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #475569, stop:1 #334155); "
+            f"border: 1px solid #64748B; color: #FFFFFF; font-weight: 800; font-size: {_s(13, s)}px; "
+            f"border-radius: {_s(9, s)}px; padding: {_s(8, s)}px {_s(12, s)}px;"
+        )
+        self.preheat_btn.setStyleSheet(
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F97316, stop:1 #EA580C); "
+            f"border: 1px solid #FB923C; color: #FFFFFF; font-weight: 800; font-size: {_s(12, s)}px; "
+            f"border-radius: {_s(9, s)}px; padding: {_s(6, s)}px {_s(12, s)}px;"
+        )
+        self.btn_extrude.setStyleSheet(
+            f"background: rgba(16, 185, 129, 0.22); border: 1.5px solid #10B981; color: #34D399; "
+            f"font-weight: 900; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: 0 {_s(10, s)}px;"
+        )
+        self.btn_retract.setStyleSheet(
+            f"background: rgba(56, 189, 248, 0.20); border: 1.5px solid #38BDF8; color: #7DD3FC; "
+            f"font-weight: 900; font-size: {_s(12, s)}px; border-radius: {_s(8, s)}px; padding: 0 {_s(10, s)}px;"
+        )
+        self._set_extrude_dist(self._extrude_dist)
