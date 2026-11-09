@@ -561,6 +561,19 @@ _SVG.update({
   <path d="M48 32 A18 18 0 1 1 42.7 19.3" fill="none" stroke="#38BDF8" stroke-width="5" stroke-linecap="round"/>
   <polygon points="46,10 52,22 40,22" fill="#38BDF8"/>
 </svg>""",
+
+    "wifi": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="wfg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00E5FF"/><stop offset="1" stop-color="#3B82F6"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="50" r="4.5" fill="#00E5FF"/>
+  <path d="M22 40 C 25 36 39 36 42 40" fill="none" stroke="url(#wfg)" stroke-width="4.2" stroke-linecap="round"/>
+  <path d="M13 29 C 19 22 45 22 51 29" fill="none" stroke="url(#wfg)" stroke-width="4.2" stroke-linecap="round"/>
+  <path d="M4 18 C 14 8 50 8 60 18" fill="none" stroke="url(#wfg)" stroke-width="4.2" stroke-linecap="round"/>
+</svg>""",
 })
 
 

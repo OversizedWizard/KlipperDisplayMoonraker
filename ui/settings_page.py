@@ -715,13 +715,22 @@ class SettingsPage(QtWidgets.QWidget):
         self.grid_sys.addWidget(self.fw_info_card, 0, 1)
         self.sys_cards.append(self.fw_info_card)
 
+        self.wifi_card = SystemOptionTile(
+            "wifi", "Wi-Fi & Network Settings",
+            "Manage Wi-Fi, scan SSIDs & network status.",
+            "WLAN: CONNECTING...",
+            on_click=self._on_wifi_settings
+        )
+        self.grid_sys.addWidget(self.wifi_card, 1, 0)
+        self.sys_cards.append(self.wifi_card)
+
         self.disp_card = SystemOptionTile(
             "sun", "Display & Sleep Timer",
             "Screen sleep timeout & display info.",
             self._sleep_badge_text(),
             on_click=self._on_display_info
         )
-        self.grid_sys.addWidget(self.disp_card, 1, 0)
+        self.grid_sys.addWidget(self.disp_card, 1, 1)
         self.sys_cards.append(self.disp_card)
 
         self.disp_restart_card = SystemOptionTile(
@@ -730,8 +739,10 @@ class SettingsPage(QtWidgets.QWidget):
             "RESTART APP",
             on_click=self._on_restart_display_service
         )
-        self.grid_sys.addWidget(self.disp_restart_card, 1, 1)
+        self.grid_sys.addWidget(self.disp_restart_card, 2, 0)
         self.sys_cards.append(self.disp_restart_card)
+
+        self.update_wifi_badge()
 
         self.grid_sys.setColumnMinimumWidth(0, 1)
         self.grid_sys.setColumnMinimumWidth(1, 1)
@@ -995,6 +1006,35 @@ class SettingsPage(QtWidgets.QWidget):
             main_win.open_sub_screen(view, title="Display & Sleep Timer", return_page="settings")
         else:
             view.show()
+
+    def _on_wifi_settings(self, tile):
+        main_win = self.window()
+        from .wifi_page import WifiScreen
+        view = WifiScreen(scale=self._scale, parent=main_win)
+        if hasattr(main_win, "open_sub_screen"):
+            main_win.open_sub_screen(view, title="Wi-Fi Settings", return_page="settings")
+        else:
+            view.show()
+
+    def update_wifi_badge(self):
+        try:
+            from .wifi_page import WifiManager
+            st = WifiManager.get_status()
+            if st.get("connected"):
+                ssid = st.get("ssid", "Connected")
+                ip = st.get("ip", "")
+                self.wifi_card.badge_lbl.setText(f"WLAN: {ssid.upper()[:14]}")
+                if ip and ip != "--.--.--.--":
+                    self.wifi_card.sub_label.setText(f"IP: {ip} • Signal: {st.get('signal_pct', 80)}%")
+            else:
+                self.wifi_card.badge_lbl.setText("WLAN: DISCONNECTED")
+                self.wifi_card.sub_label.setText("Scan & connect to Wi-Fi networks")
+        except Exception:
+            pass
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.update_wifi_badge()
 
     def apply_scale(self, s: float):
         self._scale = s
