@@ -11,7 +11,7 @@ from .calibrate_page import CalibratePage
 from .power_page import PowerPage
 from .spool_page import SpoolPage
 from .moonraker import MoonrakerClient
-from .settings_page import SettingsPage
+from .settings_page import SettingsPage, load_display_settings
 from .qt import QtCore, QtWidgets, Qt, Signal
 from .theme import BASE_W, BASE_H, build_stylesheet
 
@@ -355,7 +355,101 @@ class MainWindow(QtWidgets.QWidget):
         self.apply_scale()
         for page in self.pages.values():
             page.moonraker = self.moonraker
+
+        # Screen Sleep Timer & Inactivity Monitor (user config in ~/.klipper_display_settings.json)
+        self._sleeping = False
+        self._sleep_overlay = None
+        self._last_filament_used_mm = 0.0
+        self._sleep_timer = QtCore.QTimer(self)
+        self._sleep_timer.setSingleShot(True)
+        self._sleep_timer.timeout.connect(self.enter_sleep_mode)
+        app = QtWidgets.QApplication.instance()
+        if app:
+            app.installEventFilter(self)
+        self.reload_sleep_settings()
+
         self.moonraker.start()
+
+    def eventFilter(self, obj, event):
+        t = event.type()
+        if t in (
+            QtCore.QEvent.Type.MouseButtonPress,
+            QtCore.QEvent.Type.TouchBegin,
+            QtCore.QEvent.Type.KeyPress,
+            QtCore.QEvent.Type.Wheel,
+        ):
+            if getattr(self, "_sleeping", False):
+                self.wake_from_sleep()
+                return True
+            self._reset_sleep_timer()
+        return super().eventFilter(obj, event)
+
+    def reload_sleep_settings(self):
+        cfg = load_display_settings()
+        self._sleep_timeout_min = int(cfg.get("sleep_timeout_min", 10))
+        self._reset_sleep_timer()
+
+    def _reset_sleep_timer(self):
+        if not hasattr(self, "_sleep_timer"):
+            return
+        self._sleep_timer.stop()
+        mins = getattr(self, "_sleep_timeout_min", 10)
+        if mins > 0 and not getattr(self, "_sleeping", False):
+            self._sleep_timer.start(mins * 60 * 1000)
+
+    def enter_sleep_mode(self):
+        if getattr(self, "_sleeping", False):
+            return
+        self._sleeping = True
+        self._sleep_timer.stop()
+        if not self._sleep_overlay:
+            ov = QtWidgets.QFrame(self)
+            ov.setObjectName("SleepOverlay")
+            ov.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            ov.setStyleSheet("QFrame#SleepOverlay { background: #020409; } QLabel { background: transparent; border: none; }")
+            lay = QtWidgets.QVBoxLayout(ov)
+            lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lay.setSpacing(10)
+
+            self._slp_clock = QtWidgets.QLabel(datetime.now().strftime("%H:%M"))
+            self._slp_clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._slp_clock.setStyleSheet("color: rgba(248, 250, 252, 0.28); font-size: 64px; font-weight: 900; font-family: monospace;")
+            lay.addWidget(self._slp_clock)
+
+            self._slp_info = QtWidgets.QLabel("Nozzle: --°C  •  Bed: --°C  •  STANDBY")
+            self._slp_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._slp_info.setStyleSheet("color: rgba(148, 163, 184, 0.45); font-size: 15px; font-weight: 800; font-family: monospace;")
+            lay.addWidget(self._slp_info)
+
+            hint = QtWidgets.QLabel("🌙 LOW-POWER SLEEP MODE  •  TOUCH ANYWHERE TO WAKE")
+            hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            hint.setStyleSheet("color: rgba(100, 116, 139, 0.38); font-size: 11px; font-weight: 800; letter-spacing: 1.2px; margin-top: 18px;")
+            lay.addWidget(hint)
+            self._sleep_overlay = ov
+
+        self._update_sleep_overlay_text()
+        self._sleep_overlay.setGeometry(self.rect())
+        self._sleep_overlay.show()
+        self._sleep_overlay.raise_()
+
+    def _update_sleep_overlay_text(self):
+        if not getattr(self, "_sleeping", False) or not self._sleep_overlay:
+            return
+        self._slp_clock.setText(datetime.now().strftime("%H:%M"))
+        mr = getattr(self, "moonraker", None)
+        if mr:
+            st = mr.last_print_stats or {}
+            p_st = str(st.get("state", "standby")).upper()
+            pct = int(float(st.get("progress", 0.0)) * 100)
+            p_txt = f"{p_st} ({pct}%)" if p_st == "PRINTING" else p_st
+            self._slp_info.setText(f"🔥 Nozzle {mr.nozzle_temp:.0f}°C   •   🛏 Bed {mr.bed_temp:.0f}°C   •   {p_txt}")
+
+    def wake_from_sleep(self):
+        if getattr(self, "_sleeping", False):
+            self._sleeping = False
+            if self._sleep_overlay:
+                self._sleep_overlay.hide()
+        self._reset_sleep_timer()
 
     def _on_print_stats_updated(self, st: dict):
         state = st.get("state", "standby")
@@ -364,6 +458,21 @@ class MainWindow(QtWidgets.QWidget):
         filename = st.get("filename", "") or ""
         prev_file = getattr(self, "_last_raw_print_file", None)
         self._last_raw_print_file = filename
+
+        # Auto-deduct filament used during print from active spool
+        used_mm = float(st.get("filament_used", 0.0) or 0.0)
+        if used_mm < getattr(self, "_last_filament_used_mm", 0.0):
+            self._last_filament_used_mm = 0.0
+        if state == "printing" and used_mm > self._last_filament_used_mm + 20.0:
+            delta_mm = used_mm - self._last_filament_used_mm
+            self._last_filament_used_mm = used_mm
+            if "spool" in self.pages and hasattr(self.pages["spool"], "deduct_filament_mm"):
+                self.pages["spool"].deduct_filament_mm(delta_mm)
+
+        if getattr(self, "_sleeping", False):
+            self._update_sleep_overlay_text()
+            if prev_state is not None and state != prev_state and state in ("printing", "complete", "error", "paused"):
+                self.wake_from_sleep()
 
         if "printing" in self.pages:
             pp = self.pages["printing"]
@@ -499,6 +608,8 @@ class MainWindow(QtWidgets.QWidget):
         self._resize_timer.start()
         if hasattr(self, "_estop_overlay") and self._estop_overlay and self._estop_overlay.isVisible():
             self._estop_overlay.setGeometry(self.rect())
+        if hasattr(self, "_sleep_overlay") and self._sleep_overlay and self._sleep_overlay.isVisible():
+            self._sleep_overlay.setGeometry(self.rect())
 
     def apply_scale(self):
         s = min(self.width() / BASE_W, self.height() / BASE_H)

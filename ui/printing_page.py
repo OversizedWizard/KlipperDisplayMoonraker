@@ -1,4 +1,4 @@
-﻿"""Active 3D printing screen.
+"""Active 3D printing screen.
 
 Displays live print progress, large gcode thumbnail, elapsed / remaining time,
 temperatures, Fine Tune button (baby stepping, temps, speed/flow/fan),
@@ -439,6 +439,24 @@ class PrintingPage(QtWidgets.QWidget):
         """)
         self.btn_pause.clicked.connect(self._on_pause_toggle)
         act_lay.addWidget(self.btn_pause, 1)
+
+        # Exclude Object Button ([exclude_object])
+        self.btn_exclude = QtWidgets.QPushButton(" 🎯 EXCLUDE ")
+        self.btn_exclude.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_exclude.setFixedHeight(42)
+        self.btn_exclude.setStyleSheet("""
+            QPushButton {
+                background: rgba(251, 191, 36, 0.14);
+                color: #FDE68A;
+                border: 1px solid rgba(251, 191, 36, 0.45);
+                border-radius: 8px;
+                font-size: 11px;
+                font-weight: 800;
+            }
+            QPushButton:hover { background: rgba(251, 191, 36, 0.28); color: #FFFFFF; }
+        """)
+        self.btn_exclude.clicked.connect(self._open_exclude_object)
+        act_lay.addWidget(self.btn_exclude, 1)
 
         # Fine Tune Button (Z babystepping, temps, speed/flow/fan)
         self.btn_tune = QtWidgets.QPushButton(" ⚙  FINE TUNE ")
@@ -898,6 +916,83 @@ class PrintingPage(QtWidgets.QWidget):
     def _open_fine_tune(self):
         main_win = self.window()
         overlay = FineTuneOverlay(parent=main_win, scale=self._scale)
+        overlay.show()
+        overlay.raise_()
+
+    def _open_exclude_object(self):
+        main_win = self.window()
+        mr = getattr(main_win, "moonraker", None)
+        eo = (mr.last_print_stats.get("exclude_object") if (mr and mr.last_print_stats) else {}) or {}
+        objects = list(eo.get("objects") or [])
+        excluded = list(eo.get("excluded_objects") or [])
+        current = eo.get("current_object")
+
+        overlay = QtWidgets.QFrame(main_win)
+        overlay.setObjectName("ExcludeOverlay")
+        overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        overlay.setStyleSheet("QFrame#ExcludeOverlay { background: rgba(5, 10, 20, 0.88); }")
+        overlay.setGeometry(main_win.rect())
+
+        outer = QtWidgets.QVBoxLayout(overlay)
+        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QtWidgets.QFrame(overlay)
+        card.setFixedSize(_s(560, self._scale), _s(330, self._scale))
+        card.setStyleSheet(
+            f"QFrame {{ background: #0F172A; border: 2px solid #FBBF24; border-radius: {_s(14, self._scale)}px; }}"
+            "QLabel { border: none; background: transparent; }"
+        )
+        c_lay = QtWidgets.QVBoxLayout(card)
+        c_lay.setContentsMargins(16, 12, 16, 12)
+        c_lay.setSpacing(8)
+
+        hdr = QtWidgets.QHBoxLayout()
+        t_lbl = QtWidgets.QLabel("🎯  EXCLUDE OBJECT ([exclude_object])")
+        t_lbl.setStyleSheet("color: #FBBF24; font-size: 14px; font-weight: 900;")
+        hdr.addWidget(t_lbl)
+        hdr.addStretch(1)
+        close_btn = QtWidgets.QPushButton("✕ Done")
+        close_btn.setFixedHeight(28)
+        close_btn.setStyleSheet("background: #334155; color: #FFFFFF; border-radius: 6px; font-weight: 800; padding: 0 12px;")
+        close_btn.clicked.connect(overlay.deleteLater)
+        hdr.addWidget(close_btn)
+        c_lay.addLayout(hdr)
+
+        list_box = QtWidgets.QVBoxLayout()
+        if not objects:
+            empty_lbl = QtWidgets.QLabel(
+                "No multi-object parts loaded in current print.\n\n"
+                "When printing a G-code sliced with 'Label Objects / Exclude Objects' enabled,\n"
+                "individual parts appear here so you can cancel a single failed part mid-print."
+            )
+            empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 700; padding: 24px;")
+            list_box.addWidget(empty_lbl)
+        else:
+            for obj in objects[:6]:
+                name = str(obj.get("name") or "Object")
+                is_ex = name in excluded
+                is_cur = (name == current)
+                row = QtWidgets.QFrame()
+                row.setStyleSheet(
+                    f"QFrame {{ background: #1E293B; border: 1px solid {'#00E5FF' if is_cur else 'rgba(255,255,255,0.12)'}; border-radius: 8px; }}"
+                )
+                r_lay = QtWidgets.QHBoxLayout(row)
+                r_lay.setContentsMargins(10, 6, 10, 6)
+                st_tag = "✕ EXCLUDED" if is_ex else ("● PRINTING NOW" if is_cur else "● ACTIVE")
+                lbl = QtWidgets.QLabel(f"{name}   ({st_tag})")
+                lbl.setStyleSheet(f"color: {'#94A3B8' if is_ex else '#F8FAFC'}; font-size: 12px; font-weight: 800; border: none;")
+                r_lay.addWidget(lbl, 1)
+                if not is_ex:
+                    ex_btn = QtWidgets.QPushButton("Exclude Part")
+                    ex_btn.setFixedHeight(26)
+                    ex_btn.setStyleSheet("background: #EF4444; color: #FFFFFF; font-weight: 800; border-radius: 5px; padding: 0 10px;")
+                    ex_btn.clicked.connect(lambda _c=False, n=name, b=ex_btn: (mr.exclude_object(n) if mr else None, b.setText("Excluded"), b.setEnabled(False)))
+                    r_lay.addWidget(ex_btn)
+                list_box.addWidget(row)
+
+        c_lay.addLayout(list_box, 1)
+        outer.addWidget(card)
         overlay.show()
         overlay.raise_()
 

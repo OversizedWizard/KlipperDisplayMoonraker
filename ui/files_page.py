@@ -203,6 +203,16 @@ class FileDetailsDialog(QtWidgets.QFrame):
             lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(11, scale)}px; font-weight: 600;")
 
         right_box.addLayout(meta_grid)
+
+        self.health_lbl = QtWidgets.QLabel("")
+        self.health_lbl.setWordWrap(True)
+        self.health_lbl.setStyleSheet(
+            f"background: rgba(16, 185, 129, 0.14); color: #6EE7B7; border: 1px solid rgba(52, 211, 153, 0.4); "
+            f"border-radius: {_s(7, scale)}px; font-size: {_s(10, scale)}px; font-weight: 800; padding: {_s(5, scale)}px {_s(8, scale)}px;"
+        )
+        right_box.addWidget(self.health_lbl)
+        self._update_health_check()
+
         right_box.addStretch(1)
 
         # Buttons Row
@@ -250,7 +260,7 @@ class FileDetailsDialog(QtWidgets.QFrame):
         card_layout.addLayout(right_box)
 
         outer.addWidget(self.card)
-        self.card.setFixedSize(_s(540, scale), _s(270, scale))
+        self.card.setFixedSize(_s(540, scale), _s(295, scale))
 
         # Asynchronously load large thumbnail
         thumbs = self.file_info.get("thumbnails", [])
@@ -294,6 +304,7 @@ class FileDetailsDialog(QtWidgets.QFrame):
         slicer = meta.get("slicer")
         if slicer:
             self.s_val.setText(slicer)
+        self._update_health_check()
         thumbs = meta.get("thumbnails", [])
         if thumbs:
             best = max(thumbs, key=lambda t: t.get("width", 0) * t.get("height", 0))
@@ -307,6 +318,49 @@ class FileDetailsDialog(QtWidgets.QFrame):
                     target_size=_s(170, self.scale),
                     on_loaded=self._set_thumb_pixmap
                 )
+
+    def _update_health_check(self):
+        if not hasattr(self, "health_lbl"):
+            return
+        sp = {"name": "Spool 1", "type": "PLA", "nozzle_temp": 210, "weight_g": 850}
+        try:
+            win = self.window()
+            if hasattr(win, "pages") and "spool" in win.pages:
+                sp = win.pages["spool"].get_active_spool_data()
+        except Exception:
+            pass
+
+        fn = str(self.file_info.get("filename") or "").upper()
+        file_mat = str(self.file_info.get("filament_type") or "").upper()
+        if not file_mat:
+            for m_key in ("PETG", "ABS", "ASA", "TPU", "NYLON", "PLA"):
+                if m_key in fn:
+                    file_mat = m_key
+                    break
+        spool_mat = str(sp.get("type", "PLA")).upper()
+        req_g = float(self.file_info.get("filament_weight_total") or 0.0)
+        if req_g <= 0 and self.file_info.get("filament_total"):
+            req_g = float(self.file_info.get("filament_total") or 0.0) * 0.00298
+        rem_g = float(sp.get("weight_g", 1000.0))
+
+        warnings = []
+        if file_mat and file_mat not in spool_mat and spool_mat not in file_mat:
+            warnings.append(f"Material mismatch: File={file_mat} vs {sp.get('name')} ({spool_mat})")
+        if req_g > 0 and req_g > rem_g:
+            warnings.append(f"Low spool: Needs {req_g:.0f}g, only {rem_g:.0f}g left")
+
+        if warnings:
+            self.health_lbl.setText("\u26A0 " + " \u2022 ".join(warnings))
+            self.health_lbl.setStyleSheet(
+                f"background: rgba(245, 158, 11, 0.16); color: #FDE68A; border: 1px solid rgba(251, 191, 36, 0.55); "
+                f"border-radius: {_s(7, self.scale)}px; font-size: {_s(10, self.scale)}px; font-weight: 800; padding: {_s(4, self.scale)}px {_s(8, self.scale)}px;"
+            )
+        else:
+            self.health_lbl.setText(f"\u2713 Ready: Matches {sp.get('name')} ({spool_mat}, {rem_g:.0f}g avail)")
+            self.health_lbl.setStyleSheet(
+                f"background: rgba(16, 185, 129, 0.14); color: #6EE7B7; border: 1px solid rgba(52, 211, 153, 0.4); "
+                f"border-radius: {_s(7, self.scale)}px; font-size: {_s(10, self.scale)}px; font-weight: 800; padding: {_s(4, self.scale)}px {_s(8, self.scale)}px;"
+            )
 
     def _set_thumb_pixmap(self, pm: QtGui.QPixmap):
         if pm and not pm.isNull():
@@ -661,6 +715,24 @@ class FilesPage(QtWidgets.QWidget):
         top_bar.addWidget(self.path_lbl)
         top_bar.addStretch(1)
 
+        # Timelapse Videos button
+        self.btn_timelapse = QtWidgets.QPushButton(" 🎬 Timelapses ")
+        self.btn_timelapse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_timelapse.setStyleSheet("""
+            QPushButton {
+                background: rgba(192, 132, 252, 0.14);
+                color: #E9D5FF;
+                border: 1px solid rgba(192, 132, 252, 0.42);
+                border-radius: 6px;
+                font-weight: 800;
+                font-size: 11px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover { background: rgba(192, 132, 252, 0.28); color: #FFFFFF; }
+        """)
+        self.btn_timelapse.clicked.connect(self._open_timelapses_modal)
+        top_bar.addWidget(self.btn_timelapse)
+
         # View Mode Toggle: Grid vs List
         self.btn_toggle_view = QtWidgets.QPushButton(" ▦ Cards ")
         self.btn_toggle_view.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -871,6 +943,84 @@ class FilesPage(QtWidgets.QWidget):
         # 3. Request Moonraker to start printing immediately
         if mr:
             mr.start_print(clean_full_fn)
+
+    def _open_timelapses_modal(self):
+        main_win = self.window()
+        mr = self.moonraker or getattr(main_win, "moonraker", None)
+        overlay = QtWidgets.QFrame(main_win)
+        overlay.setObjectName("TimelapseOverlay")
+        overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        overlay.setStyleSheet("QFrame#TimelapseOverlay { background: rgba(5, 10, 20, 0.88); }")
+        overlay.setGeometry(main_win.rect())
+
+        outer = QtWidgets.QVBoxLayout(overlay)
+        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QtWidgets.QFrame(overlay)
+        card.setFixedSize(_s(560, self._scale), _s(320, self._scale))
+        card.setStyleSheet(
+            f"QFrame {{ background: #0F172A; border: 2px solid #C084FC; border-radius: {_s(14, self._scale)}px; }}"
+            "QLabel { border: none; background: transparent; }"
+        )
+        c_lay = QtWidgets.QVBoxLayout(card)
+        c_lay.setContentsMargins(18, 14, 18, 14)
+        c_lay.setSpacing(10)
+
+        hdr = QtWidgets.QHBoxLayout()
+        t_lbl = QtWidgets.QLabel("🎬  MOONRAKER TIMELAPSE VIDEOS")
+        t_lbl.setStyleSheet("color: #F8FAFC; font-size: 15px; font-weight: 900;")
+        hdr.addWidget(t_lbl)
+        hdr.addStretch(1)
+        close_btn = QtWidgets.QPushButton("✕ Close")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setFixedHeight(30)
+        close_btn.setStyleSheet(
+            "QPushButton { background: #334155; color: #FFFFFF; border-radius: 6px; font-weight: 800; padding: 0 12px; }"
+        )
+        close_btn.clicked.connect(overlay.deleteLater)
+        hdr.addWidget(close_btn)
+        c_lay.addLayout(hdr)
+
+        list_box = QtWidgets.QVBoxLayout()
+        status_lbl = QtWidgets.QLabel("Scanning /server/files/timelapse...")
+        status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 700; padding: 24px;")
+        list_box.addWidget(status_lbl)
+        c_lay.addLayout(list_box, 1)
+        outer.addWidget(card)
+        overlay.show()
+        overlay.raise_()
+
+        def _on_tl(files):
+            vids = [f for f in (files or []) if str(f.get("path") or f.get("filename") or "").lower().endswith((".mp4", ".webm", ".mkv", ".gif"))]
+            if not vids:
+                status_lbl.setText(
+                    "No timelapse videos recorded yet.\n\n"
+                    "When [timelapse] is enabled in Moonraker, recorded .mp4 print videos appear here and can be played & downloaded from the Web UI."
+                )
+                return
+            status_lbl.hide()
+            for v in vids[:5]:
+                fn = str(v.get("path") or v.get("filename") or "timelapse.mp4")
+                sz = format_size(int(v.get("size") or 0))
+                row = QtWidgets.QFrame()
+                row.setStyleSheet("QFrame { background: #1E293B; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; }")
+                r_lay = QtWidgets.QHBoxLayout(row)
+                r_lay.setContentsMargins(10, 6, 10, 6)
+                lbl = QtWidgets.QLabel(f"🎬 {fn}  ({sz})")
+                lbl.setStyleSheet("color: #F8FAFC; font-size: 12px; font-weight: 700; border: none;")
+                r_lay.addWidget(lbl, 1)
+                del_b = QtWidgets.QPushButton("Delete")
+                del_b.setFixedHeight(26)
+                del_b.setStyleSheet("background: #EF4444; color: #FFFFFF; font-weight: 800; border-radius: 5px; padding: 0 10px;")
+                del_b.clicked.connect(lambda _c=False, p=fn, rw=row: (mr.delete_timelapse(p), rw.deleteLater()))
+                r_lay.addWidget(del_b)
+                list_box.addWidget(row)
+
+        if mr:
+            mr.list_timelapses(on_done=_on_tl)
+        else:
+            _on_tl([])
 
     def apply_scale(self, s: float):
         self._scale = s

@@ -115,7 +115,7 @@ class MoonrakerClient(QtCore.QObject):
                 if h not in candidates:
                     candidates.append(h)
 
-            query_path = "/printer/objects/query?extruder&heater_bed&webhooks&toolhead&gcode_move&motion_report&load_cell_probe&load_cell&probe&print_stats&virtual_sdcard&display_status&fan&bed_mesh"
+            query_path = "/printer/objects/query?extruder&heater_bed&webhooks&toolhead&gcode_move&motion_report&load_cell_probe&load_cell&probe&print_stats&virtual_sdcard&display_status&fan&bed_mesh&exclude_object"
             for host in candidates:
                 try:
                     data = self._fetch_json(host, query_path, timeout=1.2)
@@ -224,7 +224,8 @@ class MoonrakerClient(QtCore.QObject):
                             "y_pos": y_pos,
                             "z_pos": z_pos,
                             "live_velocity": float(motion_rep.get("live_velocity", 0.0) or 0.0),
-                            "message": str(p_stats.get("message") or d_status.get("message") or "")
+                            "message": str(p_stats.get("message") or d_status.get("message") or ""),
+                            "exclude_object": status.get("exclude_object") or {},
                         }
                         self.last_print_stats = stats_dict
                         self.print_stats_updated.emit(stats_dict)
@@ -1151,3 +1152,44 @@ class MoonrakerClient(QtCore.QObject):
         threading.Thread(target=_run, daemon=True).start()
 
 
+    def exclude_object(self, name: str, on_done=None):
+        """Cancel a single part during a multi-object print via EXCLUDE_OBJECT."""
+        if not name:
+            return
+        self.send_gcode(f"EXCLUDE_OBJECT NAME={name}", on_done=on_done)
+
+    def list_timelapses(self, on_done=None):
+        """Fetch Moonraker timelapse video files (/server/files/list?root=timelapse)."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _run():
+            files = []
+            try:
+                data = self._fetch_json(host, "/server/files/list?root=timelapse", timeout=2.5)
+                if data and "result" in data and isinstance(data["result"], list):
+                    files = data["result"]
+            except Exception:
+                pass
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(files))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def delete_timelapse(self, rel_path: str, on_done=None):
+        """Delete a timelapse file from Moonraker."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _run():
+            ok = False
+            try:
+                enc = "/".join(urllib.parse.quote(p) for p in rel_path.split("/"))
+                url = f"http://{host}/server/files/timelapse/{enc}"
+                req = urllib.request.Request(url, method="DELETE")
+                with urllib.request.urlopen(req, timeout=3.0) as resp:
+                    ok = resp.status in (200, 201, 204)
+            except Exception:
+                ok = False
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(ok))
+
+        threading.Thread(target=_run, daemon=True).start()

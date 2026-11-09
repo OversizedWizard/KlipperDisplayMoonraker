@@ -4,10 +4,35 @@ Moved Bed Mesh, Z-Offset, and Probe Accuracy here as requested. Tapping them
 opens the detailed procedural modal explanation.
 """
 
+import json
+import os
 from . import icons
 from .calibrate_page import CalibrationDialog, CALIBRATION_DETAILS, is_calibration_supported
 from .load_cell_test_dialog import LoadCellWeightTestDialog
 from .qt import QtWidgets, QtCore, Qt, Signal
+
+DISPLAY_SETTINGS_PATH = os.path.expanduser("~/.klipper_display_settings.json")
+
+
+def load_display_settings() -> dict:
+    cfg = {"sleep_timeout_min": 10}
+    try:
+        if os.path.exists(DISPLAY_SETTINGS_PATH):
+            with open(DISPLAY_SETTINGS_PATH, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                if isinstance(d, dict):
+                    cfg.update(d)
+    except Exception:
+        pass
+    return cfg
+
+
+def save_display_settings(cfg: dict):
+    try:
+        with open(DISPLAY_SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception:
+        pass
 
 def _s(v: float, s: float) -> int:
     return max(1, round(v * s))
@@ -690,14 +715,14 @@ class SettingsPage(QtWidgets.QWidget):
         self.grid_sys.addWidget(self.fw_info_card, 0, 1)
         self.sys_cards.append(self.fw_info_card)
 
-        disp_card = SystemOptionTile(
-            "sun", "Display & Timeout",
-            "Brightness & screen blanking timer.",
-            "100% Brightness",
+        self.disp_card = SystemOptionTile(
+            "sun", "Display & Sleep Timer",
+            "Screen sleep timeout & display info.",
+            self._sleep_badge_text(),
             on_click=self._on_display_info
         )
-        self.grid_sys.addWidget(disp_card, 1, 0)
-        self.sys_cards.append(disp_card)
+        self.grid_sys.addWidget(self.disp_card, 1, 0)
+        self.sys_cards.append(self.disp_card)
 
         self.disp_restart_card = SystemOptionTile(
             "reload", "Display Service Restart",
@@ -842,24 +867,132 @@ class SettingsPage(QtWidgets.QWidget):
         from .power_page import restart_display_app
         restart_display_app(self.window())
 
+    @staticmethod
+    def _sleep_badge_text() -> str:
+        mins = int(load_display_settings().get("sleep_timeout_min", 10))
+        return f"SLEEP: {mins} MIN" if mins > 0 else "SLEEP: NEVER (OFF)"
+
     def _on_display_info(self, tile):
         main_win = self.window()
-        view = SettingsInfoView(
-            icon_name="sun",
-            title="Display & Screen Geometry",
-            subtitle="Touchscreen Resolution and Responsive Scaling",
-            badge="800x480 Scalable",
-            items=[
-                ("Target Display", "5-inch Touchscreen (Raspberry Pi DSI / HDMI)"),
-                ("Native Resolution", "800 x 480 px (Base Scale 1.0)"),
-                ("Dynamic Scaling", f"Active GUI Scale: {self._scale:.2f}x"),
-                ("Screen Brightness", "100% Backlight Level")
-            ],
-            scale=self._scale,
-            parent=self
+        cfg = load_display_settings()
+        cur_min = int(cfg.get("sleep_timeout_min", 10))
+
+        view = QtWidgets.QFrame(main_win)
+        view.setObjectName("SettingsInfoView")
+        view.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        outer = QtWidgets.QVBoxLayout(view)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        card = QtWidgets.QFrame()
+        card.setObjectName("DialogCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        outer.addWidget(card)
+
+        lay = QtWidgets.QVBoxLayout(card)
+        s = self._scale
+        m = _s(14, s)
+        lay.setContentsMargins(m, m, m, m)
+        lay.setSpacing(_s(10, s))
+
+        hdr = QtWidgets.QHBoxLayout()
+        ico_lbl = QtWidgets.QLabel()
+        ico_lbl.setPixmap(icons.pixmap("sun", _s(34, s)))
+        ico_lbl.setFixedSize(_s(38, s), _s(38, s))
+        hdr.addWidget(ico_lbl)
+
+        title_col = QtWidgets.QVBoxLayout()
+        t_lbl = QtWidgets.QLabel("Display & Screen Sleep Timer")
+        t_lbl.setObjectName("DialogTitle")
+        sub_lbl = QtWidgets.QLabel("Configure automatic low-power screen sleep timeout after inactivity")
+        sub_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 600;")
+        title_col.addWidget(t_lbl)
+        title_col.addWidget(sub_lbl)
+        hdr.addLayout(title_col, 1)
+
+        close_x = QtWidgets.QPushButton("✕")
+        close_x.setObjectName("DialogCloseX")
+        close_x.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_x.clicked.connect(lambda: main_win.close_sub_screen() if hasattr(main_win, "close_sub_screen") else view.close())
+        hdr.addWidget(close_x)
+        lay.addLayout(hdr)
+
+        # Sleep Timer Selection Box
+        sleep_box = QtWidgets.QFrame()
+        sleep_box.setObjectName("DialogStepsBox")
+        sleep_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        sb_lay = QtWidgets.QVBoxLayout(sleep_box)
+        sb_lay.setContentsMargins(_s(12, s), _s(10, s), _s(12, s), _s(10, s))
+        sb_lay.setSpacing(_s(8, s))
+
+        sb_hdr = QtWidgets.QLabel("SCREEN SLEEP TIMEOUT (USER CONFIG)")
+        sb_hdr.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 900; letter-spacing: 0.6px;")
+        sb_lay.addWidget(sb_hdr)
+
+        btn_grid = QtWidgets.QGridLayout()
+        btn_grid.setSpacing(_s(8, s))
+        opts = [(0, "Never (Off)"), (2, "2 Minutes"), (5, "5 Minutes"), (10, "10 Minutes"), (15, "15 Minutes"), (30, "30 Minutes")]
+        opt_btns = {}
+
+        def _select_min(val: int):
+            cfg["sleep_timeout_min"] = val
+            save_display_settings(cfg)
+            self.disp_card.badge_lbl.setText(self._sleep_badge_text())
+            if hasattr(main_win, "reload_sleep_settings"):
+                main_win.reload_sleep_settings()
+            for v_k, b_w in opt_btns.items():
+                if v_k == val:
+                    b_w.setStyleSheet(
+                        "QPushButton { background: #00E5FF; color: #0F172A; border: 1.5px solid #FFFFFF; "
+                        "border-radius: 8px; font-size: 12px; font-weight: 900; padding: 8px; }"
+                    )
+                else:
+                    b_w.setStyleSheet(
+                        "QPushButton { background: #1E293B; color: #CBD5E1; border: 1px solid rgba(255,255,255,0.16); "
+                        "border-radius: 8px; font-size: 12px; font-weight: 700; padding: 8px; }"
+                    )
+
+        for idx, (m_val, m_lbl) in enumerate(opts):
+            b = QtWidgets.QPushButton(m_lbl)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFixedHeight(_s(38, s))
+            b.clicked.connect(lambda _c=False, v=m_val: _select_min(v))
+            btn_grid.addWidget(b, idx // 3, idx % 3)
+            opt_btns[m_val] = b
+
+        sb_lay.addLayout(btn_grid)
+        _select_min(cur_min)
+
+        info_lbl = QtWidgets.QLabel(
+            "• Display: 5-inch Touchscreen (800×480 Base, Dynamic Scale "
+            f"{self._scale:.2f}x)\n"
+            "• Sleep mode enters a low-power dark screen showing live clock, temperatures, and print progress. Touch anywhere to wake."
         )
+        info_lbl.setWordWrap(True)
+        info_lbl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 600;")
+        sb_lay.addWidget(info_lbl)
+        lay.addWidget(sleep_box, 1)
+
+        bot = QtWidgets.QHBoxLayout()
+        test_btn = QtWidgets.QPushButton("🌙  Test Sleep Screen Now")
+        test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        test_btn.setStyleSheet(
+            "QPushButton { background: #1E293B; color: #38BDF8; border: 1px solid #38BDF8; "
+            "border-radius: 8px; font-size: 12px; font-weight: 800; padding: 6px 14px; }"
+        )
+        test_btn.clicked.connect(lambda: main_win.enter_sleep_mode() if hasattr(main_win, "enter_sleep_mode") else None)
+        bot.addWidget(test_btn)
+        bot.addStretch(1)
+
+        back_btn = QtWidgets.QPushButton("‹  Save & Return to Settings")
+        back_btn.setObjectName("DialogStartBtn")
+        back_btn.setStyleSheet("font-size: 12px; font-weight: 800; padding: 6px 18px;")
+        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.clicked.connect(lambda: main_win.close_sub_screen() if hasattr(main_win, "close_sub_screen") else view.close())
+        bot.addWidget(back_btn)
+        lay.addLayout(bot)
+
         if hasattr(main_win, "open_sub_screen"):
-            main_win.open_sub_screen(view, title="Display Settings", return_page="settings")
+            main_win.open_sub_screen(view, title="Display & Sleep Timer", return_page="settings")
         else:
             view.show()
 

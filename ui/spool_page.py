@@ -54,6 +54,8 @@ DEFAULT_SPOOLS = {
         "color": "#3B82F6",
         "nozzle_temp": 210,
         "bed_temp": 60,
+        "weight_g": 850,
+        "capacity_g": 1000,
     },
     "spool_2": {
         "id": 2,
@@ -62,6 +64,8 @@ DEFAULT_SPOOLS = {
         "color": "#10B981",
         "nozzle_temp": 240,
         "bed_temp": 75,
+        "weight_g": 1000,
+        "capacity_g": 1000,
     },
     "spool_3": {
         "id": 3,
@@ -70,6 +74,8 @@ DEFAULT_SPOOLS = {
         "color": "#EF4444",
         "nozzle_temp": 250,
         "bed_temp": 100,
+        "weight_g": 650,
+        "capacity_g": 1000,
     },
     "spool_4": {
         "id": 4,
@@ -78,6 +84,8 @@ DEFAULT_SPOOLS = {
         "color": "#F59E0B",
         "nozzle_temp": 220,
         "bed_temp": 50,
+        "weight_g": 500,
+        "capacity_g": 1000,
     },
 }
 
@@ -419,6 +427,37 @@ class SpoolPage(QtWidgets.QWidget):
         temps_grid.addWidget(self.bed_stat_box, 1)
 
         info_col.addLayout(temps_grid)
+
+        # Remaining spool weight & length box
+        self.weight_box = QtWidgets.QFrame()
+        self.weight_box.setStyleSheet(
+            "QFrame { background: rgba(15, 23, 42, 0.72); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; } QLabel { border: none; background: transparent; }"
+        )
+        wb_lay = QtWidgets.QVBoxLayout(self.weight_box)
+        wb_lay.setContentsMargins(8, 4, 8, 5)
+        wb_lay.setSpacing(3)
+        wb_top = QtWidgets.QHBoxLayout()
+        wb_k = QtWidgets.QLabel("REMAINING SPOOL")
+        wb_k.setStyleSheet("color: #94A3B8; font-size: 9px; font-weight: 800;")
+        self.card_weight_lbl = QtWidgets.QLabel("850g / 1000g (~285m)")
+        self.card_weight_lbl.setStyleSheet("color: #34D399; font-size: 11px; font-weight: 900;")
+        wb_top.addWidget(wb_k)
+        wb_top.addStretch(1)
+        wb_top.addWidget(self.card_weight_lbl)
+        wb_lay.addLayout(wb_top)
+
+        self.weight_pbar = QtWidgets.QProgressBar()
+        self.weight_pbar.setRange(0, 100)
+        self.weight_pbar.setValue(85)
+        self.weight_pbar.setTextVisible(False)
+        self.weight_pbar.setFixedHeight(6)
+        self.weight_pbar.setStyleSheet(
+            "QProgressBar { background: rgba(255,255,255,0.08); border: none; border-radius: 3px; } "
+            "QProgressBar::chunk { background: #34D399; border-radius: 3px; }"
+        )
+        wb_lay.addWidget(self.weight_pbar)
+        info_col.addWidget(self.weight_box)
+
         info_col.addStretch(1)
         sc_top.addLayout(info_col, 1)
         sc_lay.addLayout(sc_top, 1)
@@ -719,6 +758,52 @@ class SpoolPage(QtWidgets.QWidget):
 
         mc_lay.addLayout(temp_row)
 
+        # 4. Spool Remaining Weight Stepper & Quick Presets
+        w_frame = QtWidgets.QFrame()
+        w_frame.setStyleSheet(
+            "QFrame { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(52, 211, 153, 0.35); border-radius: 10px; } QLabel { border: none; background: transparent; }"
+        )
+        wf_lay = QtWidgets.QHBoxLayout(w_frame)
+        wf_lay.setContentsMargins(10, 5, 10, 5)
+        wf_lay.setSpacing(6)
+        wf_lbl = QtWidgets.QLabel("Spool Weight:")
+        wf_lbl.setStyleSheet("color: #CBD5E1; font-size: 12px; font-weight: 800;")
+        wf_lay.addWidget(wf_lbl)
+
+        w_dn = QtWidgets.QPushButton("-50g")
+        w_dn.setCursor(Qt.CursorShape.PointingHandCursor)
+        w_dn.setFixedSize(46, 28)
+        w_dn.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px;")
+        w_dn.clicked.connect(lambda: self._adj_weight(-50))
+        wf_lay.addWidget(w_dn)
+
+        self.weight_val_lbl = QtWidgets.QLabel("850 g")
+        self.weight_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.weight_val_lbl.setStyleSheet("color: #34D399; font-size: 14px; font-weight: 900; min-width: 64px;")
+        wf_lay.addWidget(self.weight_val_lbl)
+
+        w_up = QtWidgets.QPushButton("+50g")
+        w_up.setCursor(Qt.CursorShape.PointingHandCursor)
+        w_up.setFixedSize(46, 28)
+        w_up.setStyleSheet("background: #334155; color: #FFFFFF; font-weight: 800; border-radius: 6px;")
+        w_up.clicked.connect(lambda: self._adj_weight(+50))
+        wf_lay.addWidget(w_up)
+
+        wf_lay.addStretch(1)
+        for preset_g, lbl in ((1000, "Full 1kg"), (750, "750g"), (500, "500g"), (250, "250g")):
+            pb = QtWidgets.QPushButton(lbl)
+            pb.setCursor(Qt.CursorShape.PointingHandCursor)
+            pb.setFixedHeight(26)
+            pb.setStyleSheet(
+                "QPushButton { background: #1E293B; color: #CBD5E1; border: 1px solid rgba(255,255,255,0.16); "
+                "border-radius: 6px; font-size: 11px; font-weight: 800; padding: 0 8px; }"
+                "QPushButton:pressed { background: #10B981; color: #0B0F19; }"
+            )
+            pb.clicked.connect(lambda _c=False, g=preset_g: self._set_weight(g))
+            wf_lay.addWidget(pb)
+
+        mc_lay.addWidget(w_frame)
+
         # Done button row
         done_row = QtWidgets.QHBoxLayout()
         done_row.addStretch(1)
@@ -839,9 +924,26 @@ class SpoolPage(QtWidgets.QWidget):
         self.noz_val_lbl.setText(f"{noz_temp} \u00B0C")
         self.bed_val_lbl.setText(f"{bed_temp} \u00B0C")
 
+        w_g = float(data.get("weight_g", 1000))
+        cap_g = max(100.0, float(data.get("capacity_g", 1000)))
+        pct_w = max(0, min(100, int(round((w_g / cap_g) * 100))))
+        est_m = int(round(w_g / 2.98))
+        w_col = "#34D399" if pct_w > 25 else ("#FBBF24" if pct_w > 10 else "#EF4444")
+        if hasattr(self, "card_weight_lbl"):
+            self.card_weight_lbl.setText(f"{int(round(w_g))}g / {int(round(cap_g))}g (~{est_m}m)")
+            self.card_weight_lbl.setStyleSheet(f"color: {w_col}; font-size: 11px; font-weight: 900;")
+        if hasattr(self, "weight_pbar"):
+            self.weight_pbar.setValue(pct_w)
+            self.weight_pbar.setStyleSheet(
+                f"QProgressBar {{ background: rgba(255,255,255,0.08); border: none; border-radius: 3px; }} "
+                f"QProgressBar::chunk {{ background: {w_col}; border-radius: 3px; }}"
+            )
+        if hasattr(self, "weight_val_lbl"):
+            self.weight_val_lbl.setText(f"{int(round(w_g))} g")
+
         if hasattr(self, "modal_title"):
             self.modal_title.setText(f"\u2699  {name.upper()} SETTINGS")
-            self.modal_summary.setText(f"{f_type}  \u2022  {col_name}  \u2022  {noz_temp}\u00B0C / {bed_temp}\u00B0C")
+            self.modal_summary.setText(f"{f_type}  \u2022  {col_name}  \u2022  {int(round(w_g))}g  \u2022  {noz_temp}\u00B0C / {bed_temp}\u00B0C")
 
         # Highlight active filament type pill inside settings modal
         if hasattr(self, "type_btns"):
@@ -896,6 +998,37 @@ class SpoolPage(QtWidgets.QWidget):
             cur = int(self._spools[spool_key].get("bed_temp", 60))
             new_val = max(0, min(150, cur + delta))
             self._spools[spool_key]["bed_temp"] = new_val
+        self._save_spools()
+        self._refresh_spool_display()
+
+    def _adj_weight(self, delta_g: int):
+        spool_key = f"spool_{self._active_slot}"
+        cur_w = float(self._spools[spool_key].get("weight_g", 1000))
+        cap_w = float(self._spools[spool_key].get("capacity_g", 1000))
+        new_w = max(0.0, min(cap_w, cur_w + delta_g))
+        self._spools[spool_key]["weight_g"] = round(new_w, 1)
+        self._save_spools()
+        self._refresh_spool_display()
+
+    def _set_weight(self, grams: int):
+        spool_key = f"spool_{self._active_slot}"
+        self._spools[spool_key]["weight_g"] = float(grams)
+        self._spools[spool_key]["capacity_g"] = 1000.0
+        self._save_spools()
+        self._refresh_spool_display()
+
+    def get_active_spool_data(self) -> dict:
+        spool_key = f"spool_{self._active_slot}"
+        return dict(self._spools.get(spool_key, DEFAULT_SPOOLS["spool_1"]))
+
+    def deduct_filament_mm(self, used_mm: float):
+        """Deduct used filament length (mm) from active spool (~2.98g per meter of 1.75mm filament)."""
+        if used_mm <= 0:
+            return
+        spool_key = f"spool_{self._active_slot}"
+        cur_w = float(self._spools[spool_key].get("weight_g", 1000))
+        used_g = (used_mm / 1000.0) * 2.98
+        self._spools[spool_key]["weight_g"] = round(max(0.0, cur_w - used_g), 1)
         self._save_spools()
         self._refresh_spool_display()
 
