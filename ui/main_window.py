@@ -14,6 +14,7 @@ from .moonraker import MoonrakerClient
 from .settings_page import SettingsPage, load_display_settings
 from .qt import QtCore, QtWidgets, Qt, Signal
 from .theme import BASE_W, BASE_H, build_stylesheet
+from .touch_scroll import install_global_touch_scroller
 
 # key, sidebar label, page title, page description
 NAV_ITEMS = [
@@ -264,6 +265,7 @@ class PlaceholderPage(QtWidgets.QWidget):
 class MainWindow(QtWidgets.QWidget):
     def __init__(self, host: str = None):
         super().__init__()
+        install_global_touch_scroller()
         self.setObjectName("Root")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWindowTitle("Klipper 3D Display")

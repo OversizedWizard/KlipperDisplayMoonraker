@@ -12,6 +12,7 @@ import time
 import urllib.request
 from . import icons
 from .qt import QtWidgets, QtCore, QtGui, Qt, Signal
+from .touch_scroll import touch_press, touch_move, touch_release
 
 def _s(v: float, s: float) -> int:
     return max(1, round(v * s))
@@ -3236,10 +3237,22 @@ class CalibrateCard(QtWidgets.QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.on_tap(self.item)
+            touch_press(self, event)
             event.accept()
         else:
             super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not touch_move(self, event):
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if touch_release(self) and self.on_tap:
+                self.on_tap(self.item)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
     def apply_scale(self, s: float):
         m = _s(12, s)

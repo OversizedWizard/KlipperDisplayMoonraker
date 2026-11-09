@@ -10,6 +10,7 @@ import sys
 
 from ui.qt import QtWidgets, QtGui, Qt, BINDING
 from ui.main_window import MainWindow
+from ui.touch_scroll import install_global_touch_scroller
 
 
 def parse_args():
@@ -29,6 +30,7 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Klipper 3D Display")
+    install_global_touch_scroller(app)
 
     win = MainWindow(host=args.host)
     if args.hide_cursor:

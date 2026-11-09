@@ -5,6 +5,7 @@ import subprocess
 import sys
 from . import icons
 from .qt import QtWidgets, QtCore, QtGui, Qt, Signal
+from .touch_scroll import touch_press, touch_move, touch_release
 
 def _s(v: float, s: float) -> int:
     return max(1, round(v * s))
@@ -112,11 +113,23 @@ class PowerActionCard(QtWidgets.QFrame):
         self._layout.addWidget(self.arrow, 0, Qt.AlignmentFlag.AlignVCenter)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.on_click:
-            self.on_click(self)
+        if event.button() == Qt.MouseButton.LeftButton:
+            touch_press(self, event)
             event.accept()
         else:
             super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not touch_move(self, event):
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if touch_release(self) and self.on_click:
+                self.on_click(self)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
     def apply_scale(self, s: float):
         self._layout.setContentsMargins(_s(10, s), _s(6, s), _s(10, s), _s(6, s))
