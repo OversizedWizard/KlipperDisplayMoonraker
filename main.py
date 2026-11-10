@@ -6,6 +6,7 @@ Raspberry Pi touchscreen:   python main.py --fullscreen --hide-cursor
 """
 
 import argparse
+import os
 import sys
 
 from ui.qt import QtWidgets, QtGui, Qt, BINDING
@@ -32,14 +33,51 @@ def main():
     app.setApplicationName("Klipper 3D Display")
     install_global_touch_scroller(app)
 
-    win = MainWindow(host=args.host)
     if args.hide_cursor:
         app.setOverrideCursor(Qt.CursorShape.BlankCursor)
+
+    # Seamless splash screen while MainWindow initializes
+    splash = None
+    splash_candidates = [
+        os.path.join(os.path.dirname(__file__), "splash.png"),
+        os.path.join(os.path.dirname(__file__), "splash.jpg"),
+    ]
+    for sc in splash_candidates:
+        if os.path.exists(sc):
+            pix = QtGui.QPixmap(sc)
+            if not pix.isNull():
+                target_w = args.width
+                target_h = args.height
+                if args.fullscreen and app.primaryScreen():
+                    s_size = app.primaryScreen().size()
+                    target_w = s_size.width()
+                    target_h = s_size.height()
+                scaled = pix.scaled(
+                    target_w, target_h,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                canvas = QtGui.QPixmap(target_w, target_h)
+                canvas.fill(QtGui.QColor("black"))
+                painter = QtGui.QPainter(canvas)
+                px = (target_w - scaled.width()) // 2
+                py = (target_h - scaled.height()) // 2
+                painter.drawPixmap(px, py, scaled)
+                painter.end()
+                splash = QtWidgets.QSplashScreen(canvas)
+                splash.show()
+                app.processEvents()
+                break
+
+    win = MainWindow(host=args.host)
     if args.fullscreen:
         win.showFullScreen()
     else:
         win.resize(args.width, args.height)
         win.show()
+
+    if splash:
+        splash.finish(win)
 
     print(f"Klipper 3D Display running on {BINDING}")
     sys.exit(app.exec())
