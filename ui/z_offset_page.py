@@ -625,18 +625,22 @@ class ZOffsetScreen(QtWidgets.QFrame):
             px = 117.5
             py = 112.5
             try:
-                url = f"http://{host}/printer/objects/query?configfile=settings&toolhead"
+                url = f"http://{host}/printer/objects/query?configfile&toolhead"
                 req = urllib.request.Request(url, headers={"Accept": "application/json"})
                 with urllib.request.urlopen(req, timeout=2.5) as resp:
                     if resp.status == 200:
                         data = json.loads(resp.read().decode("utf-8"))
                         st = data.get("result", {}).get("status", {})
-                        cfg = (st.get("configfile", {}) or {}).get("settings", {}) or {}
+                        cf_obj = st.get("configfile", {}) or {}
+                        cfg = cf_obj.get("settings", {}) or cf_obj.get("config", {}) or {}
                         for probe_name in ("load_cell_probe", "probe", "bltouch", "smart_effector", "beacon"):
                             if probe_name in cfg and "z_offset" in cfg[probe_name]:
                                 sec = probe_name
                                 val = float(cfg[probe_name]["z_offset"])
                                 break
+                        if abs(val - (-0.200)) < 1e-4 and "stepper_z" in cfg and "position_endstop" in cfg["stepper_z"]:
+                            sec = "stepper_z"
+                            val = float(cfg["stepper_z"]["position_endstop"])
                         safe = cfg.get("safe_z_home", {})
                         if "home_xy_position" in safe:
                             pos = safe["home_xy_position"]
@@ -908,10 +912,11 @@ class ZOffsetScreen(QtWidgets.QFrame):
             self.status_lbl.setText(f"✓ Saved new z_offset = {self._stored_z:+.3f} mm (simulated).")
             return
 
-        # Ensure gcode offset matches our clearance adjustment, then apply to probe and SAVE_CONFIG
+        # Ensure gcode offset matches our clearance adjustment, then apply to probe/endstop and SAVE_CONFIG
+        apply_cmd = "Z_OFFSET_APPLY_ENDSTOP" if self._probe_section == "stepper_z" else "Z_OFFSET_APPLY_PROBE"
         cmd = (
             f"SET_GCODE_OFFSET Z={self._clearance_delta:+.4f} MOVE=0\n"
-            f"Z_OFFSET_APPLY_PROBE\n"
+            f"{apply_cmd}\n"
             f"SAVE_CONFIG"
         )
 

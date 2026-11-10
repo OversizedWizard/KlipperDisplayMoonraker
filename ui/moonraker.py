@@ -73,6 +73,7 @@ class MoonrakerClient(QtCore.QObject):
         self.last_bed_mesh: dict = {}
         self.base_z_offset: float = 0.0
         self.babystep_count: int = 0
+        self.active_print_babystep: float = 0.0
         self._busy = False
         self._dispatch_signal.connect(lambda fn: fn())
 
@@ -200,6 +201,12 @@ class MoonrakerClient(QtCore.QObject):
 
                         if abs(z_offset) < 1e-4:
                             self.babystep_count = 0
+
+                        if p_state in ("printing", "paused"):
+                            if abs(z_offset) > 1e-5:
+                                self.active_print_babystep = z_offset
+                        elif p_state == "starting":
+                            self.active_print_babystep = 0.0
 
                         stats_dict = {
                             "state": p_state,
@@ -689,12 +696,18 @@ class MoonrakerClient(QtCore.QObject):
         """Babystep live Z offset by delta mm."""
         if abs(delta) < 1e-6:
             return
+        self.active_print_babystep = round(self.active_print_babystep + delta, 4)
+        if abs(self.active_print_babystep) < 1e-5:
+            self.active_print_babystep = 0.0
+
         if hasattr(self, "last_print_stats") and self.last_print_stats:
             new_z_off = float(self.last_print_stats.get("z_offset", 0.0)) + delta
             if abs(new_z_off) < 1e-4:
                 self.babystep_count = 0
             else:
                 self.babystep_count += (1 if delta > 0 else -1)
+            self.last_print_stats["z_offset"] = new_z_off
+            self.last_print_stats["babystep_count"] = self.babystep_count
         else:
             self.babystep_count += (1 if delta > 0 else -1)
 
@@ -709,14 +722,66 @@ class MoonrakerClient(QtCore.QObject):
             cmd = f"SET_GCODE_OFFSET Z_ADJUST={delta:+.4f}"
         self.send_gcode(cmd, on_done=_after)
 
-    def save_z_offset(self, on_done=None):
+    def save_z_offset(self, delta: float = None, on_done=None):
         """Apply babystepped Z offset and persist to printer.cfg via SAVE_CONFIG."""
-        has_probe = any(k in self.objects for k in ["probe", "bltouch", "load_cell_probe", "smart_effector"])
-        if has_probe:
-            cmd = "Z_OFFSET_APPLY_PROBE\\nSAVE_CONFIG"
-        else:
-            cmd = "Z_OFFSET_APPLY_ENDSTOP\\nSAVE_CONFIG"
-        self.send_gcode(cmd, on_done=on_done, timeout=20.0)
+        if delta is None:
+            delta = getattr(self, "active_print_babystep", 0.0)
+            if abs(delta) < 1e-5 and hasattr(self, "last_print_stats"):
+                delta = float(self.last_print_stats.get("z_offset", 0.0))
+
+        if abs(delta) < 1e-5:
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(False, "Offset is 0.000 mm"))
+            return
+
+        # Check for probe in config or registered objects
+        has_probe = any(k in (self.config or {}) for k in ["load_cell_probe", "probe", "bltouch", "smart_effector", "beacon"]) or any(k in (self.objects or []) for k in ["probe", "bltouch", "smart_effector", "beacon"])
+
+        apply_cmd = "Z_OFFSET_APPLY_PROBE" if has_probe else "Z_OFFSET_APPLY_ENDSTOP"
+        cmd = f"SET_GCODE_OFFSET Z={delta:+.4f} MOVE=0\n{apply_cmd}\nSAVE_CONFIG"
+
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+
+        def _run():
+            try:
+                url = f"http://{host}/printer/gcode/script"
+                payload = json.dumps({"script": cmd}).encode("utf-8")
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=25.0) as resp:
+                    pass
+            except Exception:
+                # SAVE_CONFIG immediately restarts Klipper, closing the HTTP connection abruptly
+                pass
+
+            self.active_print_babystep = 0.0
+
+            # Background poll for Klipper restart completion and config reload
+            def _poll_ready():
+                import time
+                tries = 0
+                while tries < 25:
+                    time.sleep(1.2)
+                    tries += 1
+                    try:
+                        p_info = self._fetch_json(host, "/printer/info", timeout=1.5)
+                        if p_info and p_info.get("result", {}).get("state") == "ready":
+                            self._config_fetched = False
+                            self._fetch_config_and_objects(host)
+                            break
+                    except Exception:
+                        pass
+
+            threading.Thread(target=_poll_ready, daemon=True).start()
+
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(True, None))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def get_printer_cfg(self, on_done=None):
         """Fetch raw printer.cfg content from Moonraker or local filesystem."""

@@ -151,6 +151,7 @@ class PrintingPage(QtWidgets.QWidget):
 
         self._current_filename = ""
         self._print_state = "standby"
+        self._session_babystep = 0.0
         self._total_duration = 0.0
         self._print_duration = 0.0
         self._progress = 0.0
@@ -558,7 +559,7 @@ class PrintingPage(QtWidgets.QWidget):
         fn = file_info.get("filename") or file_info.get("full_path") or ""
         self._current_filename = fn
         self.filename_lbl.setText(fn)
-
+        self._session_babystep = 0.0
         self._print_state = "starting"
         self.progress_bar.setValue(0)
         self.pct_lbl.setText("0%")
@@ -817,6 +818,7 @@ class PrintingPage(QtWidgets.QWidget):
                 border: 1px solid #00E5FF; border-radius: 6px; font-weight: 800; font-size: 13px; padding: 2px 8px;
             """)
             self.actions_stack.setCurrentIndex(1)
+            self._update_save_z_btn()
         elif state in ("cancelled", "cancelling"):
             self.status_pill.setText("🚫 CANCELLED")
             self.status_pill.setStyleSheet("""
@@ -881,6 +883,8 @@ class PrintingPage(QtWidgets.QWidget):
     def update_z_babystep(self, z_off: float, base_z: float = 0.0, step_count: int = 0):
         """Update top badge and under-image Z Adjust Offset & Baby Steps Added telemetry."""
         self.babystep_lbl.setText(f"Z-Offset: {z_off:+.3f} mm")
+        if abs(z_off) > 1e-5:
+            self._session_babystep = z_off
         effective_z = (base_z - z_off) if abs(base_z) > 1e-4 else z_off
         if hasattr(self, "adj_z_val_lbl"):
             if abs(base_z) > 1e-4:
@@ -1023,14 +1027,66 @@ class PrintingPage(QtWidgets.QWidget):
         if hasattr(main_win, "show_page"):
             main_win.show_page("home")
 
+    def _update_save_z_btn(self):
+        mr = getattr(self.window(), "moonraker", None)
+        delta = self._session_babystep
+        if abs(delta) < 1e-5 and mr and hasattr(mr, "active_print_babystep") and abs(mr.active_print_babystep) > 1e-5:
+            delta = mr.active_print_babystep
+            self._session_babystep = delta
+
+        if abs(delta) >= 1e-4:
+            self.btn_save_z.setText(f" 💾  SAVE Z-OFFSET ({delta:+.3f}mm) TO CONFIG ")
+            self.btn_save_z.setEnabled(True)
+            self.btn_save_z.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10B981, stop:1 #059669);
+                    color: #FFFFFF;
+                    border: 1.5px solid #34D399;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 900;
+                }
+                QPushButton:hover { background: #059669; }
+            """)
+        else:
+            self.btn_save_z.setText(" 💾  Z-OFFSET UNCHANGED (0.000mm) ")
+            self.btn_save_z.setEnabled(False)
+            self.btn_save_z.setStyleSheet("""
+                QPushButton {
+                    background: rgba(30, 41, 59, 0.4);
+                    color: #64748B;
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+            """)
+
     def _on_save_z_offset(self):
         mr = getattr(self.window(), "moonraker", None)
-        if mr:
-            self.btn_save_z.setText(" SAVING TO CONFIG... ")
-            self.btn_save_z.setEnabled(False)
-            def _done(ok):
-                self.btn_save_z.setText(" ✅ Z-OFFSET SAVED! ")
-            mr.save_z_offset(on_done=_done)
+        if not mr:
+            return
+        delta = self._session_babystep
+        if abs(delta) < 1e-5 and hasattr(mr, "active_print_babystep") and abs(mr.active_print_babystep) > 1e-5:
+            delta = mr.active_print_babystep
+
+        if abs(delta) < 1e-5:
+            self.btn_save_z.setText(" ℹ️ NO BABYSTEP TO SAVE ")
+            return
+
+        self.btn_save_z.setText(f" SAVING ({delta:+.3f}mm) & RESTARTING... ")
+        self.btn_save_z.setEnabled(False)
+
+        def _done(ok, msg=None):
+            if ok:
+                self.btn_save_z.setText(f" ✅ Z-OFFSET ({delta:+.3f}mm) SAVED! ")
+                self._session_babystep = 0.0
+            else:
+                err_text = f" ⚠️ {msg} " if msg else " ⚠️ SAVE FAILED "
+                self.btn_save_z.setText(err_text[:30])
+                self.btn_save_z.setEnabled(True)
+
+        mr.save_z_offset(delta=delta, on_done=_done)
 
     def _on_return_home(self):
         main_win = self.window()
