@@ -193,6 +193,85 @@ The uninstaller removes the service, deletes desktop icons, and offers to unmask
 
 ---
 
+## 📷 Camera Setup (CSI / OV5647 + Official 7" DSI Touchscreen)
+
+If running a **CSI Camera (e.g. 5MP OV5647)** alongside the **Official Raspberry Pi 7" DSI Touchscreen Display**, both devices share the internal Unicam/DSI I2C bus (`i2c-10` on `i2c0mux`). 
+
+### 1. Boot Configuration (`/boot/firmware/config.txt`)
+Under modern Raspberry Pi OS (Bullseye / Bookworm / Trixie) with KMS graphics, the touchscreen is managed natively by the kernel's `edt-ft5406` driver. Do **NOT** use legacy firmware touch overlays:
+
+```ini
+# Auto-detect camera sensor (OV5647) and DSI panel
+camera_auto_detect=1
+display_auto_detect=1
+
+# Modern KMS Graphics Driver (Required for direct kernel touch + camera)
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+
+# ⚠️ CRITICAL: Ensure legacy firmware touch & floating GPIO lines are DISABLED:
+# DO NOT include dtoverlay=rpi-ft5406 (forces GPU polling of 0x38 at 60Hz, locking the shared I2C bus and killing the camera)
+# DO NOT include dtoverlay=w1-gpio unless an actual 1-wire sensor is wired to GPIO 4
+```
+
+### 2. Dedicated Camera Streamer Service (`klipper-cam.service`)
+Create `/etc/systemd/system/klipper-cam.service`:
+
+```ini
+[Unit]
+Description=OV5647 Camera Streamer
+After=network.target
+
+[Service]
+User=pi
+Type=simple
+ExecStart=/usr/bin/camera-streamer \
+  --camera-type=libcamera \
+  --camera-format=YUYV \
+  --camera-width=1296 \
+  --camera-height=972 \
+  --camera-fps=30 \
+  --camera-nbufs=3 \
+  --http-listen=0.0.0.0 \
+  --http-port=8080
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now klipper-cam.service
+```
+
+### 3. Alternative: Crowsnest Configuration (`crowsnest.conf`)
+If you manage your stream with Crowsnest instead of a standalone systemd service, configure `/home/pi/printer_data/config/crowsnest.conf`:
+
+```ini
+[crowsnest]
+log_level: verbose
+rollover_on_start: false
+no_proxy: true
+
+[cam 1]
+mode: camera-streamer
+port: 8080
+device: /base/soc/i2c0mux/i2c@1/ov5647@36
+resolution: 1296x972
+max_fps: 30
+custom_flags: --camera-format=YUYV
+```
+
+### 4. Streaming Endpoints
+* **Live MJPEG Stream**: `http://<pi-ip>:8080/?action=stream` or `http://<pi-ip>/webcam/?action=stream`
+* **Direct High-Res Snapshot**: `http://<pi-ip>:8080/?action=snapshot` or `http://<pi-ip>/webcam/?action=snapshot`
+* **Ultra-Low Latency WebRTC**: `http://<pi-ip>:8080/webrtc`
+
+---
+
 ## 📄 License
 This project is licensed under the MIT License. See `LICENSE` for details.
 
