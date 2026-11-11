@@ -805,6 +805,7 @@ class SettingsPage(QtWidgets.QWidget):
             item = self.grid_cal.takeAt(0)
             w = item.widget()
             if w:
+                w.setParent(None)
                 w.deleteLater()
         self.cal_cards.clear()
 

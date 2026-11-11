@@ -200,7 +200,18 @@ class HistoryDetailsDialog(QtWidgets.QFrame):
         # Section 1: Timing & Filament
         meta = job.get("metadata", {}) or {}
         sec1 = QtWidgets.QFrame()
-        sec1.setStyleSheet(f"background: #131D33; border: 1px solid rgba(255,255,255,0.06); border-radius: {_s(8, scale)}px;")
+        sec1.setObjectName("DetailSec")
+        sec1.setStyleSheet(f"""
+            QFrame#DetailSec {{
+                background: #131D33;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: {_s(8, scale)}px;
+            }}
+            QFrame#DetailSec QLabel {{
+                border: none;
+                background: transparent;
+            }}
+        """)
         s1_lay = QtWidgets.QVBoxLayout(sec1)
         s1_lay.setContentsMargins(_s(10, scale), _s(8, scale), _s(10, scale), _s(8, scale))
         s1_lay.setSpacing(_s(6, scale))
@@ -245,7 +256,18 @@ class HistoryDetailsDialog(QtWidgets.QFrame):
 
         # Section 2: Calibration & Slicer
         sec2 = QtWidgets.QFrame()
-        sec2.setStyleSheet(f"background: #131D33; border: 1px solid rgba(255,255,255,0.06); border-radius: {_s(8, scale)}px;")
+        sec2.setObjectName("DetailSec")
+        sec2.setStyleSheet(f"""
+            QFrame#DetailSec {{
+                background: #131D33;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: {_s(8, scale)}px;
+            }}
+            QFrame#DetailSec QLabel {{
+                border: none;
+                background: transparent;
+            }}
+        """)
         s2_lay = QtWidgets.QVBoxLayout(sec2)
         s2_lay.setContentsMargins(_s(10, scale), _s(8, scale), _s(10, scale), _s(8, scale))
         s2_lay.setSpacing(_s(6, scale))
@@ -309,7 +331,7 @@ class HistoryDetailsDialog(QtWidgets.QFrame):
         cancel_btn.clicked.connect(self.close)
         btn_row.addWidget(cancel_btn)
 
-        self.reprint_btn = QtWidgets.QPushButton("🖨 Print Again")
+        self.reprint_btn = QtWidgets.QPushButton("▶ Print Again")
         self.reprint_btn.setFixedHeight(_s(42, scale))
         self.reprint_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.reprint_btn.setStyleSheet(f"""
@@ -375,7 +397,7 @@ class ClearConfirmDialog(QtWidgets.QFrame):
         layout.setContentsMargins(_s(20, scale), _s(20, scale), _s(20, scale), _s(20, scale))
         layout.setSpacing(_s(14, scale))
 
-        ti = QtWidgets.QLabel("🗑 Clear All Print History?")
+        ti = QtWidgets.QLabel("Clear All Print History?")
         ti.setStyleSheet(f"color: #F87171; font-size: {_s(16, scale)}px; font-weight: 900;")
         layout.addWidget(ti)
 
@@ -536,7 +558,7 @@ class HistoryItemCard(QtWidgets.QFrame):
 
         dur_str = format_duration(job.get("total_duration") or job.get("print_duration", 0))
         fil_str = format_filament(job.get("filament_used", 0))
-        stat_lbl = QtWidgets.QLabel(f"⏱ {dur_str}  •  🧵 {fil_str}")
+        stat_lbl = QtWidgets.QLabel(f"Time: {dur_str}   •   Fil: {fil_str}")
         stat_lbl.setMinimumWidth(0)
         stat_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(10, scale)}px; font-weight: 600;")
         mid.addWidget(stat_lbl)
@@ -547,7 +569,7 @@ class HistoryItemCard(QtWidgets.QFrame):
         right_box = QtWidgets.QHBoxLayout()
         right_box.setSpacing(_s(8, scale))
 
-        reprint_btn = QtWidgets.QPushButton("🖨 Print Again")
+        reprint_btn = QtWidgets.QPushButton("▶ Print Again")
         reprint_btn.setFixedHeight(_s(32, scale))
         reprint_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         reprint_btn.setStyleSheet(f"""
@@ -692,7 +714,7 @@ class HistoryPage(QtWidgets.QWidget):
         row1.addWidget(self.refresh_btn)
 
         # Clear All button
-        self.clear_btn = QtWidgets.QPushButton("🗑 Clear All")
+        self.clear_btn = QtWidgets.QPushButton("✕ Clear All")
         self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_btn.setFixedHeight(_s(28, scale))
         self.clear_btn.setStyleSheet(f"""
