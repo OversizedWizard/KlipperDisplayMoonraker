@@ -915,35 +915,30 @@ class HistoryPage(QtWidgets.QWidget):
         self._filtered_jobs = filtered
         self._rendered_count = 0
 
-        self.list_container.setUpdatesEnabled(False)
-        try:
-            self._clear_list_items()
-            self.scroll.verticalScrollBar().setValue(0)
+        self._clear_list_items()
+        self.scroll.verticalScrollBar().setValue(0)
 
-            if not filtered:
-                empty_box = QtWidgets.QFrame()
-                empty_box.setStyleSheet(f"""
-                    background: #0D1527;
-                    border: 1px dashed rgba(255, 255, 255, 0.1);
-                    border-radius: {_s(12, self.scale)}px;
-                    padding: {_s(40, self.scale)}px;
-                """)
-                e_lay = QtWidgets.QVBoxLayout(empty_box)
-                e_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                e_lbl = QtWidgets.QLabel("No print history found")
-                e_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(14, self.scale)}px; font-weight: 800;")
-                e_lay.addWidget(e_lbl, 0, Qt.AlignmentFlag.AlignCenter)
-                e_sub = QtWidgets.QLabel("Completed and cancelled print jobs will show up here.")
-                e_sub.setStyleSheet(f"color: #64748B; font-size: {_s(11, self.scale)}px;")
-                e_lay.addWidget(e_sub, 0, Qt.AlignmentFlag.AlignCenter)
-                self.list_layout.addWidget(empty_box)
-                return
+        if not filtered:
+            empty_box = QtWidgets.QFrame()
+            empty_box.setStyleSheet(f"""
+                background: #0D1527;
+                border: 1px dashed rgba(255, 255, 255, 0.1);
+                border-radius: {_s(12, self.scale)}px;
+                padding: {_s(40, self.scale)}px;
+            """)
+            e_lay = QtWidgets.QVBoxLayout(empty_box)
+            e_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            e_lbl = QtWidgets.QLabel("No print history found")
+            e_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(14, self.scale)}px; font-weight: 800;")
+            e_lay.addWidget(e_lbl, 0, Qt.AlignmentFlag.AlignCenter)
+            e_sub = QtWidgets.QLabel("Completed and cancelled print jobs will show up here.")
+            e_sub.setStyleSheet(f"color: #64748B; font-size: {_s(11, self.scale)}px;")
+            e_lay.addWidget(e_sub, 0, Qt.AlignmentFlag.AlignCenter)
+            self.list_layout.addWidget(empty_box)
+            return
 
-            self._append_next_batch()
-        finally:
-            self.list_container.setUpdatesEnabled(True)
-            self.list_layout.activate()
-            self.list_container.adjustSize()
+        self._append_next_batch()
+        self.list_layout.activate()
 
     def _append_next_batch(self):
         if self._load_more_btn is not None:
@@ -973,15 +968,8 @@ class HistoryPage(QtWidgets.QWidget):
             self.list_layout.addWidget(btn)
 
     def _on_load_more(self):
-        self.list_container.setUpdatesEnabled(False)
-        try:
-            self._append_next_batch()
-        finally:
-            self.list_container.setUpdatesEnabled(True)
-            self.list_layout.activate()
-            self.list_container.adjustSize()
-            self.list_layout.activate()
-            self.list_container.adjustSize()
+        self._append_next_batch()
+        self.list_layout.activate()
 
     def _open_job_details(self, job: dict):
         if is_drag_active():
