@@ -6,6 +6,8 @@ opens the detailed procedural modal explanation.
 
 import json
 import os
+import threading
+import time
 from . import icons
 from .calibrate_page import CalibrationDialog, CALIBRATION_DETAILS, is_calibration_supported
 from .load_cell_test_dialog import LoadCellWeightTestDialog
@@ -666,12 +668,17 @@ class LiveSystemLoadsView(QtWidgets.QFrame):
 
 
 class SettingsPage(QtWidgets.QWidget):
+    _wifi_status_ready = Signal(dict)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.key = "settings"
         self._scale = 1.0
         self._config = {}
         self._objects = []
+        self._wifi_status_ts = 0.0
+        self._wifi_status_inflight = False
+        self._wifi_status_ready.connect(self._apply_wifi_status)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -1042,10 +1049,32 @@ class SettingsPage(QtWidgets.QWidget):
         else:
             view.show()
 
-    def update_wifi_badge(self):
+    def update_wifi_badge(self, force: bool = False):
+        now = time.monotonic()
+        if not force and self._wifi_status_ts > 0.0 and (now - self._wifi_status_ts) < 15.0:
+            return
+        if self._wifi_status_inflight:
+            return
+        self._wifi_status_inflight = True
+
+        def _worker():
+            st = None
+            try:
+                from .wifi_page import WifiManager
+                st = WifiManager.get_status()
+            except Exception:
+                st = None
+            try:
+                self._wifi_status_ready.emit(st or {})
+            except Exception:
+                self._wifi_status_inflight = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_wifi_status(self, st: dict):
+        self._wifi_status_inflight = False
+        self._wifi_status_ts = time.monotonic()
         try:
-            from .wifi_page import WifiManager
-            st = WifiManager.get_status()
             if st.get("connected"):
                 ssid = st.get("ssid", "Connected")
                 ip = st.get("ip", "")

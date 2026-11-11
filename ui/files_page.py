@@ -682,6 +682,10 @@ class FilesPage(QtWidgets.QWidget):
 
         self.dirs_data: List[dict] = []
         self.files_data: List[dict] = []
+        self._last_loaded_dir = None
+        self._last_loaded_ts = 0.0
+        self._last_listing_sig = None
+        self._history_view = None
 
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(14, 10, 14, 12)
@@ -787,7 +791,7 @@ class FilesPage(QtWidgets.QWidget):
             }
             QPushButton:hover { background: rgba(255, 255, 255, 0.16); color: #FFFFFF; }
         """)
-        self.btn_refresh.clicked.connect(self.refresh)
+        self.btn_refresh.clicked.connect(lambda: self.refresh(force=True))
         top_bar.addWidget(self.btn_refresh)
 
         main_layout.addLayout(top_bar)
@@ -814,10 +818,24 @@ class FilesPage(QtWidgets.QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.refresh()
+        import time as _time
+        if (
+            self._last_loaded_dir != self.current_dir
+            or (_time.monotonic() - self._last_loaded_ts) > 20.0
+        ):
+            self.refresh()
 
-    def refresh(self):
+    def refresh(self, force: bool = False):
         """Query Moonraker for current folder contents."""
+        import time as _time
+        if (
+            not force
+            and self._last_loaded_dir == self.current_dir
+            and self._last_listing_sig is not None
+            and (_time.monotonic() - self._last_loaded_ts) < 2.0
+        ):
+            return
+        self._force_render_next = force
         mr = getattr(self, "moonraker", None) or getattr(self.window(), "moonraker", None)
         if mr:
             self.moonraker = mr
@@ -826,33 +844,54 @@ class FilesPage(QtWidgets.QWidget):
             self._render_empty("Connecting to Moonraker...")
 
     def _on_files_loaded(self, res: dict):
-        self.dirs_data = [d for d in res.get("dirs", []) if not d.get("dirname", "").startswith(".")]
-        self.files_data = [f for f in res.get("files", []) if not f.get("filename", "").startswith(".")]
+        import time as _time
+        dirs = [d for d in res.get("dirs", []) if not d.get("dirname", "").startswith(".")]
+        files = [f for f in res.get("files", []) if not f.get("filename", "").startswith(".")]
+        sig = (
+            self.current_dir,
+            tuple(d.get("dirname") for d in dirs),
+            tuple((f.get("filename"), f.get("size"), f.get("modified")) for f in files),
+        )
+        self._last_loaded_dir = self.current_dir
+        self._last_loaded_ts = _time.monotonic()
+        force = getattr(self, "_force_render_next", False)
+        self._force_render_next = False
+        if not force and sig == self._last_listing_sig:
+            return
+        self._last_listing_sig = sig
+        self.dirs_data = dirs
+        self.files_data = files
         self._render_view()
 
     def _render_view(self):
-        old_w = self.scroll.takeWidget()
-        if old_w:
-            old_w.deleteLater()
+        self.scroll.setUpdatesEnabled(False)
+        try:
+            old_w = self.scroll.takeWidget()
+            if old_w:
+                old_w.hide()
+                old_w.setParent(None)
+                old_w.deleteLater()
 
-        self.content_widget = QtWidgets.QWidget()
-        self.content_layout = QtWidgets.QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(0, 0, 0, 0)
-        self.content_layout.setSpacing(10)
-        self.scroll.setWidget(self.content_widget)
+            self.content_widget = QtWidgets.QWidget()
+            self.content_layout = QtWidgets.QVBoxLayout(self.content_widget)
+            self.content_layout.setContentsMargins(0, 0, 0, 0)
+            self.content_layout.setSpacing(10)
+            self.scroll.setWidget(self.content_widget)
 
-        is_sub = (self.current_dir != "gcodes")
-        self.btn_back.setVisible(is_sub)
-        self.path_lbl.setText(f"📁  {self.current_dir}")
+            is_sub = (self.current_dir != "gcodes")
+            self.btn_back.setVisible(is_sub)
+            self.path_lbl.setText(f"📁  {self.current_dir}")
 
-        if not self.dirs_data and not self.files_data:
-            self._render_empty("No G-Code files or folders found in this directory.")
-            return
+            if not self.dirs_data and not self.files_data:
+                self._render_empty("No G-Code files or folders found in this directory.")
+                return
 
-        if self.view_mode == "grid":
-            self._render_grid()
-        else:
-            self._render_list()
+            if self.view_mode == "grid":
+                self._render_grid()
+            else:
+                self._render_list()
+        finally:
+            self.scroll.setUpdatesEnabled(True)
 
     def _render_grid(self):
         grid_container = QtWidgets.QWidget()
@@ -924,14 +963,14 @@ class FilesPage(QtWidgets.QWidget):
         if dirname:
             self.dir_history.append(self.current_dir)
             self.current_dir = f"{self.current_dir}/{dirname}"
-            self.refresh()
+            self.refresh(force=True)
 
     def _on_back_clicked(self):
         if self.dir_history:
             self.current_dir = self.dir_history.pop()
         else:
             self.current_dir = "gcodes"
-        self.refresh()
+        self.refresh(force=True)
 
     def _on_file_clicked(self, item: dict):
         main_win = self.window()
@@ -1046,11 +1085,14 @@ class FilesPage(QtWidgets.QWidget):
     def _open_history(self):
         main_win = self.window()
         mr = self.moonraker or getattr(main_win, "moonraker", None)
-        from .history_page import HistoryPage
-        hist_view = HistoryPage(moonraker=mr, scale=self._scale, parent=main_win)
-        hist_view.start_print_requested.connect(
-            lambda fn: self._start_print({"filename": fn, "full_path": fn})
-        )
+        if self._history_view is None:
+            from .history_page import HistoryPage
+            self._history_view = HistoryPage(moonraker=mr, scale=self._scale, parent=main_win)
+            self._history_view.start_print_requested.connect(
+                lambda fn: self._start_print({"filename": fn, "full_path": fn})
+            )
+        hist_view = self._history_view
+        hist_view.moonraker = mr
         if mr:
             hist_view.reload_history()
         if hasattr(main_win, "open_sub_screen"):

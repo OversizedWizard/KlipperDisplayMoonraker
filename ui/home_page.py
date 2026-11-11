@@ -700,12 +700,17 @@ class HomePage(QtWidgets.QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._check_mesh_config()
+        import time as _time
+        last = getattr(self, "_mesh_checked_at", 0.0)
+        if (_time.monotonic() - last) > 15.0 or not hasattr(self, "_mesh_mode"):
+            self._check_mesh_config()
 
     def _check_mesh_config(self):
         main_win = self.window()
         mr = getattr(main_win, "moonraker", None)
         if mr:
+            import time as _time
+            self._mesh_checked_at = _time.monotonic()
             mr.check_start_gcode_mesh(on_done=self._on_mesh_checked)
         else:
             QtCore.QTimer.singleShot(1000, self._check_mesh_config)

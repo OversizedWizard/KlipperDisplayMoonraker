@@ -593,25 +593,58 @@ class MoonrakerClient(QtCore.QObject):
                 self._dispatch_signal.emit(lambda: on_done(res))
         threading.Thread(target=_run, daemon=True).start()
 
-    def get_history(self, limit: int = 50, on_done=None):
-        """Fetch print job history list from Moonraker."""
+    @staticmethod
+    def _history_sig(jobs: list):
+        return tuple(
+            (j.get("job_id"), j.get("status"), j.get("end_time"), j.get("total_duration"))
+            for j in (jobs or [])
+        )
+
+    def get_history(self, limit: int = 50, on_done=None, force: bool = False):
+        """Fetch print job history list from Moonraker, serving cached jobs first."""
+        import time as _time
         host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+        cache = getattr(self, "_history_cache", None)
+        now = _time.monotonic()
+        cached_sig = None
+        if cache and cache.get("host") == host and cache.get("limit", 0) >= limit:
+            cached_jobs = cache.get("jobs", [])[:limit]
+            cached_sig = self._history_sig(cached_jobs)
+            if on_done:
+                on_done(list(cached_jobs))
+            if not force and (now - cache.get("ts", 0.0)) < 5.0:
+                return
+
         def _run():
-            jobs = []
+            jobs = None
             try:
                 url = f"http://{host}/server/history/list?limit={limit}&order=desc"
                 with urllib.request.urlopen(url, timeout=4.0) as resp:
                     if resp.status == 200:
                         data = json.loads(resp.read().decode("utf-8"))
                         jobs = data.get("result", {}).get("jobs", [])
-            except Exception as e:
-                pass
+            except Exception:
+                jobs = None
+            if jobs is None:
+                if cached_sig is None and on_done:
+                    self._dispatch_signal.emit(lambda: on_done([]))
+                return
+            self._history_cache = {
+                "host": host,
+                "limit": limit,
+                "ts": _time.monotonic(),
+                "jobs": jobs,
+            }
+            new_sig = self._history_sig(jobs)
+            if cached_sig is not None and new_sig == cached_sig:
+                return
             if on_done:
                 self._dispatch_signal.emit(lambda: on_done(jobs))
         threading.Thread(target=_run, daemon=True).start()
 
     def delete_all_history(self, on_done=None):
         """Delete all print history records via Moonraker DELETE /server/history/job?all=true."""
+        self._history_cache = None
         host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
         def _run():
             ok = False
@@ -622,6 +655,8 @@ class MoonrakerClient(QtCore.QObject):
                     ok = (resp.status == 200)
             except Exception:
                 pass
+            if ok:
+                self._history_cache = None
             if on_done:
                 self._dispatch_signal.emit(lambda: on_done(ok))
         threading.Thread(target=_run, daemon=True).start()

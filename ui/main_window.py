@@ -375,19 +375,20 @@ class MainWindow(QtWidgets.QWidget):
 
         self.moonraker.start()
 
+    _WAKE_EVENT_TYPES = (
+        QtCore.QEvent.Type.MouseButtonPress,
+        QtCore.QEvent.Type.TouchBegin,
+        QtCore.QEvent.Type.KeyPress,
+        QtCore.QEvent.Type.Wheel,
+    )
+
     def eventFilter(self, obj, event):
-        t = event.type()
-        if t in (
-            QtCore.QEvent.Type.MouseButtonPress,
-            QtCore.QEvent.Type.TouchBegin,
-            QtCore.QEvent.Type.KeyPress,
-            QtCore.QEvent.Type.Wheel,
-        ):
+        if event.type() in self._WAKE_EVENT_TYPES:
             if getattr(self, "_sleeping", False):
                 self.wake_from_sleep()
                 return True
             self._reset_sleep_timer()
-        return super().eventFilter(obj, event)
+        return False
 
     def reload_sleep_settings(self):
         cfg = load_display_settings()
@@ -538,6 +539,7 @@ class MainWindow(QtWidgets.QWidget):
         self._sub_return_page = return_page or getattr(self, "_current_page", "home") or "home"
 
         self.sub_screen_layout.addWidget(widget)
+        widget.show()
 
         if hasattr(widget, "closed"):
             widget.closed.connect(self.close_sub_screen)
@@ -555,8 +557,6 @@ class MainWindow(QtWidgets.QWidget):
         """Close the active sub-screen and return to the previous main page."""
         target_page = getattr(self, "_sub_return_page", "home") or "home"
         self._sub_return_page = "home"
-        self._clear_sub_screen()
-        self.topbar.set_back_visible(False)
         self._current_page = None  # Reset so show_page won't skip!
         self.show_page(target_page)
 
@@ -564,6 +564,7 @@ class MainWindow(QtWidgets.QWidget):
         if hasattr(self, "_active_sub_widget") and self._active_sub_widget:
             w = self._active_sub_widget
             self._active_sub_widget = None
+            keep_alive = getattr(w, "_cache_sub_screen", False)
             if hasattr(w, "closed"):
                 try:
                     w.closed.disconnect(self.close_sub_screen)
@@ -574,20 +575,20 @@ class MainWindow(QtWidgets.QWidget):
                     w._cleanup()
                 except Exception:
                     pass
-            if hasattr(w, "close"):
-                try:
-                    w.close()
-                except Exception:
-                    pass
+            w.hide()
             self.sub_screen_layout.removeWidget(w)
-            w.setParent(None)
-            w.deleteLater()
+            if not keep_alive:
+                if hasattr(w, "close"):
+                    try:
+                        w.close()
+                    except Exception:
+                        pass
+                w.setParent(None)
+                w.deleteLater()
 
     def show_page(self, key: str):
-        if hasattr(self, "_active_sub_widget") and self._active_sub_widget:
-            self._clear_sub_screen()
-            self.topbar.set_back_visible(False)
-        elif key == getattr(self, "_current_page", "") and self.stack.currentWidget() == self.pages.get(key):
+        had_sub = bool(getattr(self, "_active_sub_widget", None))
+        if not had_sub and key == getattr(self, "_current_page", "") and self.stack.currentWidget() == self.pages.get(key):
             # Already on the requested page and showing it; ignore redundant rapid clicks
             return
         # If user taps Print in sidebar while actively printing, show the live print page
@@ -598,7 +599,11 @@ class MainWindow(QtWidgets.QWidget):
                 if st in ("printing", "paused"):
                     key = "printing"
         self._current_page = key
+        # Switch visible page first, then hide/remove any active sub-screen
         self.stack.setCurrentWidget(self.pages[key])
+        if had_sub:
+            self._clear_sub_screen()
+            self.topbar.set_back_visible(False)
         if key == "history" and hasattr(self.pages[key], "reload_history"):
             self.pages[key].reload_history()
         sidebar_key = "files" if key == "printing" else key

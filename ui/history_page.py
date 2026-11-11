@@ -472,41 +472,21 @@ class HistoryItemCard(QtWidgets.QFrame):
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
         self.setMinimumWidth(0)
 
-        self.setStyleSheet(f"""
-            QFrame#HistoryItemCard {{
-                background: #0F172A;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: {_s(10, scale)}px;
-            }}
-            QFrame#HistoryItemCard:hover {{
-                border-color: #00E5FF;
-                background: #17233B;
-            }}
-        """)
-
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(_s(10, scale), _s(8, scale), _s(10, scale), _s(8, scale))
         layout.setSpacing(_s(10, scale))
 
         success = is_job_successful(job)
-        st_color = "#10B981" if success else "#EF4444"
-        st_bg = "rgba(16, 185, 129, 0.16)" if success else "rgba(239, 68, 68, 0.18)"
-        st_border = "rgba(16, 185, 129, 0.45)" if success else "rgba(239, 68, 68, 0.5)"
+        ok_prop = "true" if success else "false"
         st_icon = "✔" if success else "✖"
         st_label = "SUCCESS" if success else (job.get("status", "FAILED").upper())
 
-        # Status icon circle
+        # Status icon circle (styled via parent HistoryPage QSS)
         icon_lbl = QtWidgets.QLabel(st_icon)
+        icon_lbl.setObjectName("HistIcon")
+        icon_lbl.setProperty("ok", ok_prop)
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_lbl.setFixedSize(_s(36, scale), _s(36, scale))
-        icon_lbl.setStyleSheet(f"""
-            background: {st_bg};
-            color: {st_color};
-            border: 1.5px solid {st_border};
-            border-radius: {_s(8, scale)}px;
-            font-size: {_s(16, scale)}px;
-            font-weight: 900;
-        """)
         layout.addWidget(icon_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Center info block
@@ -517,32 +497,17 @@ class HistoryItemCard(QtWidgets.QFrame):
         tag_row.setSpacing(_s(8, scale))
 
         st_tag = QtWidgets.QLabel(st_label)
-        st_tag.setStyleSheet(f"""
-            background: {st_bg};
-            color: {st_color};
-            border: 1px solid {st_border};
-            border-radius: {_s(4, scale)}px;
-            padding: {_s(1, scale)}px {_s(6, scale)}px;
-            font-size: {_s(9, scale)}px;
-            font-weight: 800;
-        """)
+        st_tag.setObjectName("HistTag")
+        st_tag.setProperty("ok", ok_prop)
         tag_row.addWidget(st_tag)
 
         date_lbl = QtWidgets.QLabel(format_date_short(job.get("start_time", 0)))
-        date_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(10, scale)}px; font-weight: 600;")
+        date_lbl.setObjectName("HistDate")
         tag_row.addWidget(date_lbl)
 
         mesh_str = detect_bed_mesh(job)
         mesh_tag = QtWidgets.QLabel(f"Mesh: {mesh_str}")
-        mesh_tag.setStyleSheet(f"""
-            background: rgba(56, 189, 248, 0.12);
-            color: #38BDF8;
-            border: 1px solid rgba(56, 189, 248, 0.3);
-            border-radius: {_s(4, scale)}px;
-            padding: {_s(1, scale)}px {_s(6, scale)}px;
-            font-size: {_s(9, scale)}px;
-            font-weight: 700;
-        """)
+        mesh_tag.setObjectName("HistMesh")
         tag_row.addWidget(mesh_tag)
         tag_row.addStretch(1)
         mid.addLayout(tag_row)
@@ -552,49 +517,30 @@ class HistoryItemCard(QtWidgets.QFrame):
         if len(clean_fn) > 30:
             clean_fn = clean_fn[:27] + "..."
         name_lbl = QtWidgets.QLabel(clean_fn)
+        name_lbl.setObjectName("HistName")
         name_lbl.setMinimumWidth(0)
-        name_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(13, scale)}px; font-weight: 800;")
         mid.addWidget(name_lbl)
 
         dur_str = format_duration(job.get("total_duration") or job.get("print_duration", 0))
         fil_str = format_filament(job.get("filament_used", 0))
         stat_lbl = QtWidgets.QLabel(f"Time: {dur_str}   •   Fil: {fil_str}")
+        stat_lbl.setObjectName("HistStat")
         stat_lbl.setMinimumWidth(0)
-        stat_lbl.setStyleSheet(f"color: #94A3B8; font-size: {_s(10, scale)}px; font-weight: 600;")
         mid.addWidget(stat_lbl)
 
         layout.addLayout(mid, 1)
 
         # Right actions: Print Again + Arrow
-        right_box = QtWidgets.QHBoxLayout()
-        right_box.setSpacing(_s(8, scale))
-
         reprint_btn = QtWidgets.QPushButton("▶ Print Again")
+        reprint_btn.setObjectName("HistReprintBtn")
         reprint_btn.setFixedHeight(_s(32, scale))
         reprint_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reprint_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: rgba(0, 229, 255, 0.14);
-                border: 1px solid rgba(0, 229, 255, 0.45);
-                color: #00E5FF;
-                border-radius: {_s(6, scale)}px;
-                font-size: {_s(10, scale)}px;
-                font-weight: 800;
-                padding: 0 {_s(10, scale)}px;
-            }}
-            QPushButton:hover {{
-                background: #00E5FF;
-                color: #020617;
-            }}
-        """)
         reprint_btn.clicked.connect(self._on_reprint)
-        right_box.addWidget(reprint_btn)
+        layout.addWidget(reprint_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         arrow_lbl = QtWidgets.QLabel("›")
-        arrow_lbl.setStyleSheet(f"color: #64748B; font-size: {_s(18, scale)}px; font-weight: 700;")
-        right_box.addWidget(arrow_lbl)
-
-        layout.addLayout(right_box)
+        arrow_lbl.setObjectName("HistArrow")
+        layout.addWidget(arrow_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
     def _on_reprint(self):
         self.reprint_requested.emit(self.job)
@@ -622,6 +568,7 @@ class HistoryItemCard(QtWidgets.QFrame):
 class HistoryPage(QtWidgets.QWidget):
     """Print History Page: displays successful and failed prints, stats modal, kinetic scrolling, clear all."""
     start_print_requested = Signal(str)
+    PAGE_SIZE = 20
 
     def __init__(self, moonraker=None, scale: float = 1.0, parent=None):
         super().__init__(parent)
@@ -631,9 +578,15 @@ class HistoryPage(QtWidgets.QWidget):
         self.jobs: List[dict] = []
         self.active_filter = "all"  # "all", "completed", "failed"
         self._active_dialog = None
+        self._cache_sub_screen = True
+        self._filtered_jobs: List[dict] = []
+        self._rendered_count = 0
+        self._load_more_btn = None
+        self._last_render_sig = None
 
         self.setObjectName("HistoryPage")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._apply_list_stylesheet(scale)
 
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -710,7 +663,7 @@ class HistoryPage(QtWidgets.QWidget):
                 font-weight: 800;
             }}
         """)
-        self.refresh_btn.clicked.connect(self.reload_history)
+        self.refresh_btn.clicked.connect(lambda: self.reload_history(force=True))
         row1.addWidget(self.refresh_btn)
 
         # Clear All button
@@ -750,24 +703,9 @@ class HistoryPage(QtWidgets.QWidget):
         self.flt_fail.setCheckable(True)
 
         for b, flt_val in [(self.flt_all, "all"), (self.flt_succ, "completed"), (self.flt_fail, "failed")]:
+            b.setObjectName("HistFilterBtn")
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setFixedHeight(_s(28, scale))
-            b.setStyleSheet(f"""
-                QPushButton {{
-                    background: #1E293B;
-                    border: 1px solid rgba(255, 255, 255, 0.12);
-                    color: #94A3B8;
-                    border-radius: {_s(6, scale)}px;
-                    font-size: {_s(10, scale)}px;
-                    font-weight: 800;
-                    padding: 0 {_s(12, scale)}px;
-                }}
-                QPushButton:checked {{
-                    background: #00E5FF;
-                    color: #020617;
-                    border-color: #00E5FF;
-                }}
-            """)
             b.clicked.connect(lambda _c=False, f=flt_val: self._on_filter_changed(f))
             self.flt_group.addButton(b)
             row2.addWidget(b)
@@ -796,14 +734,138 @@ class HistoryPage(QtWidgets.QWidget):
         self.scroll.setWidget(self.list_container)
         main_layout.addWidget(self.scroll, 1)
 
+    def _apply_list_stylesheet(self, s: float):
+        self.setStyleSheet(f"""
+            QPushButton#HistFilterBtn {{
+                background: #1E293B;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                color: #94A3B8;
+                border-radius: {_s(6, s)}px;
+                font-size: {_s(10, s)}px;
+                font-weight: 800;
+                padding: 0 {_s(12, s)}px;
+            }}
+            QPushButton#HistFilterBtn:checked {{
+                background: #00E5FF;
+                color: #020617;
+                border-color: #00E5FF;
+            }}
+            QFrame#HistoryItemCard {{
+                background: #0F172A;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: {_s(10, s)}px;
+            }}
+            QFrame#HistoryItemCard:hover {{
+                border-color: #00E5FF;
+                background: #17233B;
+            }}
+            QLabel#HistIcon {{
+                border-radius: {_s(8, s)}px;
+                font-size: {_s(16, s)}px;
+                font-weight: 900;
+            }}
+            QLabel#HistIcon[ok="true"] {{
+                background: rgba(16, 185, 129, 0.16);
+                color: #10B981;
+                border: 1.5px solid rgba(16, 185, 129, 0.45);
+            }}
+            QLabel#HistIcon[ok="false"] {{
+                background: rgba(239, 68, 68, 0.18);
+                color: #EF4444;
+                border: 1.5px solid rgba(239, 68, 68, 0.5);
+            }}
+            QLabel#HistTag {{
+                border-radius: {_s(4, s)}px;
+                padding: {_s(1, s)}px {_s(6, s)}px;
+                font-size: {_s(9, s)}px;
+                font-weight: 800;
+            }}
+            QLabel#HistTag[ok="true"] {{
+                background: rgba(16, 185, 129, 0.16);
+                color: #10B981;
+                border: 1px solid rgba(16, 185, 129, 0.45);
+            }}
+            QLabel#HistTag[ok="false"] {{
+                background: rgba(239, 68, 68, 0.18);
+                color: #EF4444;
+                border: 1px solid rgba(239, 68, 68, 0.5);
+            }}
+            QLabel#HistDate {{
+                color: #94A3B8;
+                font-size: {_s(10, s)}px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+            }}
+            QLabel#HistMesh {{
+                background: rgba(56, 189, 248, 0.12);
+                color: #38BDF8;
+                border: 1px solid rgba(56, 189, 248, 0.3);
+                border-radius: {_s(4, s)}px;
+                padding: {_s(1, s)}px {_s(6, s)}px;
+                font-size: {_s(9, s)}px;
+                font-weight: 700;
+            }}
+            QLabel#HistName {{
+                color: #F8FAFC;
+                font-size: {_s(13, s)}px;
+                font-weight: 800;
+                background: transparent;
+                border: none;
+            }}
+            QLabel#HistStat {{
+                color: #94A3B8;
+                font-size: {_s(10, s)}px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+            }}
+            QPushButton#HistReprintBtn {{
+                background: rgba(0, 229, 255, 0.14);
+                border: 1px solid rgba(0, 229, 255, 0.45);
+                color: #00E5FF;
+                border-radius: {_s(6, s)}px;
+                font-size: {_s(10, s)}px;
+                font-weight: 800;
+                padding: 0 {_s(10, s)}px;
+            }}
+            QPushButton#HistReprintBtn:hover {{
+                background: #00E5FF;
+                color: #020617;
+            }}
+            QLabel#HistArrow {{
+                color: #64748B;
+                font-size: {_s(18, s)}px;
+                font-weight: 700;
+                background: transparent;
+                border: none;
+            }}
+            QPushButton#HistLoadMoreBtn {{
+                background: #1E293B;
+                border: 1px solid rgba(0, 229, 255, 0.35);
+                color: #7DD3FC;
+                border-radius: {_s(8, s)}px;
+                font-size: {_s(11, s)}px;
+                font-weight: 800;
+                padding: {_s(8, s)}px {_s(16, s)}px;
+            }}
+            QPushButton#HistLoadMoreBtn:hover {{
+                background: rgba(0, 229, 255, 0.18);
+                color: #FFFFFF;
+            }}
+        """)
+
     def set_moonraker(self, mr):
         self.moonraker = mr
         self.reload_history()
 
-    def reload_history(self):
+    def reload_history(self, force: bool = False):
         if not self.moonraker:
             return
-        self.moonraker.get_history(limit=100, on_done=self._on_history_loaded)
+        if force:
+            self.moonraker.get_history(limit=100, on_done=self._on_history_loaded, force=True)
+        else:
+            self.moonraker.get_history(limit=100, on_done=self._on_history_loaded)
 
     def _on_history_loaded(self, jobs: list):
         self.jobs = list(jobs) if jobs else []
@@ -819,48 +881,101 @@ class HistoryPage(QtWidgets.QWidget):
         self.badge_fail.setText(f"✖ {fail}")
 
     def _on_filter_changed(self, flt: str):
+        if flt == self.active_filter and self._last_render_sig is not None:
+            return
         self.active_filter = flt
         self._populate_list()
 
-    def _populate_list(self):
-        # Clear existing items
+    def _clear_list_items(self):
+        self._load_more_btn = None
         while self.list_layout.count() > 0:
             item = self.list_layout.takeAt(0)
             w = item.widget()
             if w:
+                w.setUpdatesEnabled(False)
+                w.hide()
                 w.setParent(None)
                 w.deleteLater()
 
+    def _populate_list(self):
         filtered = self.jobs
         if self.active_filter == "completed":
             filtered = [j for j in self.jobs if is_job_successful(j)]
         elif self.active_filter == "failed":
             filtered = [j for j in self.jobs if is_job_failed(j)]
 
-        if not filtered:
-            empty_box = QtWidgets.QFrame()
-            empty_box.setStyleSheet(f"""
-                background: #0D1527;
-                border: 1px dashed rgba(255, 255, 255, 0.1);
-                border-radius: {_s(12, self.scale)}px;
-                padding: {_s(40, self.scale)}px;
-            """)
-            e_lay = QtWidgets.QVBoxLayout(empty_box)
-            e_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            e_lbl = QtWidgets.QLabel("No print history found")
-            e_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(14, self.scale)}px; font-weight: 800;")
-            e_lay.addWidget(e_lbl, 0, Qt.AlignmentFlag.AlignCenter)
-            e_sub = QtWidgets.QLabel("Completed and cancelled print jobs will show up here.")
-            e_sub.setStyleSheet(f"color: #64748B; font-size: {_s(11, self.scale)}px;")
-            e_lay.addWidget(e_sub, 0, Qt.AlignmentFlag.AlignCenter)
-            self.list_layout.addWidget(empty_box)
+        sig = (
+            self.active_filter,
+            round(self.scale, 2),
+            tuple((j.get("job_id"), j.get("status"), j.get("end_time"), j.get("total_duration")) for j in filtered),
+        )
+        if sig == self._last_render_sig and self.list_layout.count() > 0:
             return
+        self._last_render_sig = sig
+        self._filtered_jobs = filtered
+        self._rendered_count = 0
 
-        for job in filtered:
+        self.list_container.setUpdatesEnabled(False)
+        try:
+            self._clear_list_items()
+            self.scroll.verticalScrollBar().setValue(0)
+
+            if not filtered:
+                empty_box = QtWidgets.QFrame()
+                empty_box.setStyleSheet(f"""
+                    background: #0D1527;
+                    border: 1px dashed rgba(255, 255, 255, 0.1);
+                    border-radius: {_s(12, self.scale)}px;
+                    padding: {_s(40, self.scale)}px;
+                """)
+                e_lay = QtWidgets.QVBoxLayout(empty_box)
+                e_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                e_lbl = QtWidgets.QLabel("No print history found")
+                e_lbl.setStyleSheet(f"color: #F8FAFC; font-size: {_s(14, self.scale)}px; font-weight: 800;")
+                e_lay.addWidget(e_lbl, 0, Qt.AlignmentFlag.AlignCenter)
+                e_sub = QtWidgets.QLabel("Completed and cancelled print jobs will show up here.")
+                e_sub.setStyleSheet(f"color: #64748B; font-size: {_s(11, self.scale)}px;")
+                e_lay.addWidget(e_sub, 0, Qt.AlignmentFlag.AlignCenter)
+                self.list_layout.addWidget(empty_box)
+                return
+
+            self._append_next_batch()
+        finally:
+            self.list_container.setUpdatesEnabled(True)
+
+    def _append_next_batch(self):
+        if self._load_more_btn is not None:
+            btn = self._load_more_btn
+            self._load_more_btn = None
+            self.list_layout.removeWidget(btn)
+            btn.hide()
+            btn.setParent(None)
+            btn.deleteLater()
+
+        end = min(len(self._filtered_jobs), self._rendered_count + self.PAGE_SIZE)
+        for job in self._filtered_jobs[self._rendered_count:end]:
             card = HistoryItemCard(job, scale=self.scale, parent=self.list_container)
             card.clicked.connect(self._open_job_details)
             card.reprint_requested.connect(self._on_reprint_requested)
             self.list_layout.addWidget(card)
+        self._rendered_count = end
+
+        remaining = len(self._filtered_jobs) - self._rendered_count
+        if remaining > 0:
+            btn = QtWidgets.QPushButton(f"Load More ({remaining} older prints)")
+            btn.setObjectName("HistLoadMoreBtn")
+            btn.setFixedHeight(_s(36, self.scale))
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(self._on_load_more)
+            self._load_more_btn = btn
+            self.list_layout.addWidget(btn)
+
+    def _on_load_more(self):
+        self.list_container.setUpdatesEnabled(False)
+        try:
+            self._append_next_batch()
+        finally:
+            self.list_container.setUpdatesEnabled(True)
 
     def _open_job_details(self, job: dict):
         if is_drag_active():
@@ -892,7 +1007,7 @@ class HistoryPage(QtWidgets.QWidget):
 
     def _do_clear_all(self):
         if self.moonraker:
-            self.moonraker.delete_all_history(on_done=lambda _ok: self.reload_history())
+            self.moonraker.delete_all_history(on_done=lambda _ok: self.reload_history(force=True))
 
     def _on_reprint_requested(self, job: dict):
         fn = job.get("filename")
@@ -919,4 +1034,6 @@ class HistoryPage(QtWidgets.QWidget):
         if s == self.scale:
             return
         self.scale = s
-        self._populate_list()
+        self._apply_list_stylesheet(s)
+        if self.jobs:
+            self._populate_list()

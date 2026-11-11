@@ -36,6 +36,12 @@ def _find_scroll_area(w: QtWidgets.QWidget | None) -> QtWidgets.QScrollArea | No
     return None
 
 
+_MOUSE_PRESS = QtCore.QEvent.Type.MouseButtonPress
+_MOUSE_MOVE = QtCore.QEvent.Type.MouseMove
+_MOUSE_RELEASE = QtCore.QEvent.Type.MouseButtonRelease
+_HANDLED_EVENT_TYPES = (_MOUSE_PRESS, _MOUSE_MOVE, _MOUSE_RELEASE)
+
+
 class KineticTouchFilter(QtCore.QObject):
     """Application-wide event filter that provides smooth kinetic drag-scrolling for all QScrollAreas.
 
@@ -94,6 +100,11 @@ class KineticTouchFilter(QtCore.QObject):
 
     def eventFilter(self, obj: QtCore.QObject, ev: QtCore.QEvent) -> bool:
         global _is_dragging_globally, _last_drag_ended_time
+        t = ev.type()
+        if t not in _HANDLED_EVENT_TYPES:
+            return False
+        if t == _MOUSE_MOVE and self.active_scroll is None:
+            return False
         if not isinstance(obj, QtWidgets.QWidget):
             return False
 
@@ -102,8 +113,6 @@ class KineticTouchFilter(QtCore.QObject):
             return False
         if getattr(obj, "no_touch_scroll", False) or obj.property("no_touch_scroll"):
             return False
-
-        t = ev.type()
 
         if t == QtCore.QEvent.Type.MouseButtonPress and ev.button() == QtCore.Qt.MouseButton.LeftButton:
             _is_dragging_globally = False
