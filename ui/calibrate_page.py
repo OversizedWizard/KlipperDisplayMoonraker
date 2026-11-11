@@ -42,9 +42,9 @@ CALIBRATION_DETAILS = {
         "prereqs": "Clean, cold nozzle. Use a known hanging weight (e.g. 100g) OR place a digital scale on the bed under the nozzle.",
         "steps": [
             "1. Run LOAD_CELL_CALIBRATE (ensuring nozzle/sensor is empty).",
-            "2. Send ACCEPT to capture zero baseline tare.",
-            "3. Hang known weight OR place scale on bed & jog Z to touch scale.",
-            "4. Report scale reading / weight in grams (e.g. 100g) and send ACCEPT.",
+            "2. Send TARE to capture zero baseline.",
+            "3. Hang known weight OR press nozzle onto bed scale (>=1% ADC change).",
+            "4. Send CALIBRATE GRAMS=... then ACCEPT multiplier.",
             "5. Run SAVE_CONFIG to permanently store multiplier in printer.cfg."
         ],
         "target_cmd": "LOAD_CELL_CALIBRATE"
@@ -2006,21 +2006,19 @@ class CalibrationDialog(QtWidgets.QFrame):
 
         is_homed = ("x" in homed and "y" in homed and "z" in homed)
         needs_homing = cal_id in (
-            "input_shaper", "probe_cal", "load_cell_cal", "z_tilt",
+            "input_shaper", "probe_cal", "z_tilt",
             "quad_gantry_level", "bed_mesh", "screws_tilt", "bed_screws",
             "probe_acc", "axis_twist", "delta_cal"
         )
 
         if needs_homing and not is_homed and mr and mr.connected:
             # Home only if axes are not already homed
-            if cal_id in ("input_shaper", "probe_cal", "load_cell_cal"):
+            if cal_id in ("input_shaper", "probe_cal"):
                 self.stack.setCurrentWidget(self.cal_page)
                 if cal_id == "input_shaper":
                     self.right_stack.setCurrentWidget(self.telemetry_page)
-                elif cal_id == "probe_cal":
-                    self.right_stack.setCurrentWidget(self.probe_jog_page)
                 else:
-                    self.right_stack.setCurrentWidget(self.load_cell_panel)
+                    self.right_stack.setCurrentWidget(self.probe_jog_page)
             self.title_lbl.setText("Homing Printer (G28)...")
             self.cmd_lbl.setText("G28  \u2022  HOMING FIRST")
             self.status_bar_lbl.setText("Axes not homed. Homing all axes (G28) first...")
@@ -2796,23 +2794,78 @@ class CalibrationDialog(QtWidgets.QFrame):
         if mr and mr.connected:
             mr.send_gcode(f"G91\nG1 Z{step:+.2f} F300\nG90")
 
-    def _on_scale_step1_accept(self):
+    def _verify_gcode_step(self, expected_cmd: str, on_result):
+        """Check recent Moonraker gcode_store because Unknown command returns HTTP 200."""
+        mr = self._get_moonraker()
+        host = (mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")) if mr else "127.0.0.1:7125"
+
+        def _bg():
+            err_msg = None
+            try:
+                url = f"http://{host}/server/gcode_store?count=8"
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        store = data.get("result", {}).get("gcode_store", [])
+                        cmd_key = expected_cmd.split()[0].upper()
+                        tail = store
+                        for i in range(len(store) - 1, -1, -1):
+                            if store[i].get("type") == "command" and store[i].get("message", "").strip().upper().startswith(cmd_key):
+                                tail = store[i + 1:]
+                                break
+                        for item in tail:
+                            m = item.get("message", "").strip()
+                            if m.startswith("!!") or "unknown command" in m.lower() or "error" in m.lower() or "different" in m.lower() or "must be" in m.lower():
+                                err_msg = m.lstrip("!/ ").strip()
+                                break
+            except Exception:
+                pass
+
+            def _emit():
+                on_result(err_msg is None, err_msg)
+
+            if mr and hasattr(mr, "_dispatch_signal"):
+                mr._dispatch_signal.emit(_emit)
+            else:
+                QtCore.QTimer.singleShot(0, _emit)
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _on_scale_step1_accept(self, _retried: bool = False):
         self.step1_btn.setEnabled(False)
         self.step1_btn.setText("Capturing empty zero (TARE)...")
         mr = self._get_moonraker()
         if mr and mr.connected:
-            mr.send_gcode("TARE", on_done=lambda ok: self._after_step1_tare(ok))
+            def _after_http(ok):
+                if not ok:
+                    self._after_step1_tare(False)
+                else:
+                    self._verify_gcode_step("TARE", lambda step_ok, err: self._handle_step1_verified(step_ok, err, _retried))
+            mr.send_gcode("TARE", on_done=_after_http)
         else:
             QtCore.QTimer.singleShot(400, lambda: self._after_step1_tare(True))
 
-    def _after_step1_tare(self, ok: bool = True):
+    def _handle_step1_verified(self, step_ok: bool, err: str, retried: bool):
+        mr = self._get_moonraker()
+        if not step_ok and not retried and err and "unknown command" in err.lower() and mr and mr.connected:
+            cal_cmd = self.item.get("target_cmd", "LOAD_CELL_CALIBRATE")
+            mr.send_gcode(cal_cmd, on_done=lambda _: self._on_scale_step1_accept(_retried=True))
+            return
+        self._after_step1_tare(step_ok, err)
+
+    def _after_step1_tare(self, ok: bool = True, err: str = None):
         self.step1_btn.setEnabled(True)
         self.step1_btn.setText("\u2713  Sensor Empty \u2014 Send TARE")
         if not ok:
-            self._show_gcode_error(
-                getattr(self, "s1_terminal_lbl", None),
-                "TARE failed. Ensure Klipper is READY and LOAD_CELL_CALIBRATE is active."
-            )
+            if err and hasattr(self, "s1_terminal_lbl"):
+                self.s1_terminal_lbl.setText(f"\u26A0 {err}")
+                self.s1_terminal_lbl.setStyleSheet("color: #FCA5A5; font-size: 11px; font-family: 'Consolas', monospace;")
+            else:
+                self._show_gcode_error(
+                    getattr(self, "s1_terminal_lbl", None),
+                    "TARE failed. Ensure Klipper is READY and LOAD_CELL_CALIBRATE is active."
+                )
             return
         self._lc_session_active = True
         self._fetch_scale_calibration_multiplier(update_step3=False)
@@ -2831,18 +2884,27 @@ class CalibrationDialog(QtWidgets.QFrame):
         mr = self._get_moonraker()
         cmd = f"CALIBRATE GRAMS={self._known_grams}"
         if mr and mr.connected:
-            mr.send_gcode(cmd, on_done=lambda ok: self._after_step2_calibrate(ok))
+            def _after_http(ok):
+                if not ok:
+                    self._after_step2_calibrate(False)
+                else:
+                    self._verify_gcode_step("CALIBRATE", self._after_step2_calibrate)
+            mr.send_gcode(cmd, on_done=_after_http)
         else:
             QtCore.QTimer.singleShot(600, lambda: self._after_step2_calibrate(True))
 
-    def _after_step2_calibrate(self, ok: bool = True):
+    def _after_step2_calibrate(self, ok: bool = True, err: str = None):
         self.step2_btn.setEnabled(True)
         self.step2_btn.setText(f"\u25B6  Send Scale Reading (CALIBRATE GRAMS={self._known_grams})")
         if not ok:
-            self._show_gcode_error(
-                getattr(self, "lc_jog_status_lbl", None),
-                "CALIBRATE failed (need >=1% sensor change, e.g. press >=500g)."
-            )
+            if err and hasattr(self, "lc_jog_status_lbl"):
+                self.lc_jog_status_lbl.setText(f"\u26A0 {err}")
+                self.lc_jog_status_lbl.setStyleSheet("color: #FCA5A5; font-size: 11px; font-family: 'Consolas', monospace;")
+            else:
+                self._show_gcode_error(
+                    getattr(self, "lc_jog_status_lbl", None),
+                    "CALIBRATE failed (need >=1% sensor change, e.g. press >=500g)."
+                )
             return
         self._scale_step = 3
         self._update_scale_step_pills(3)
@@ -2916,15 +2978,22 @@ class CalibrationDialog(QtWidgets.QFrame):
         self.s3_accept_btn.setText("Saving multiplier (ACCEPT)...")
         mr = self._get_moonraker()
         if mr and mr.connected:
-            def _after_accept(ok):
+            def _after_verify(step_ok, err):
                 self.s3_accept_btn.setEnabled(True)
                 self.s3_accept_btn.setText("\u2713  Accept Multiplier (ACCEPT)")
-                if ok:
+                if step_ok:
                     self._lc_session_active = False
                     self._fetch_scale_calibration_multiplier(update_step3=False)
                     self._on_scale_calibration_finished(True)
                 else:
                     self.cmd_lbl.setText("LOAD_CELL_CALIBRATE  \u2022  ACCEPT FAILED")
+                    if hasattr(self, "s3_tare_lbl"):
+                        self.s3_tare_lbl.setText(f"\u26A0 {err or 'ACCEPT failed'}")
+            def _after_accept(ok):
+                if not ok:
+                    _after_verify(False, "ACCEPT returned error")
+                else:
+                    self._verify_gcode_step("ACCEPT", _after_verify)
             mr.send_gcode("ACCEPT", on_done=_after_accept)
         else:
             self.s3_accept_btn.setEnabled(True)

@@ -27,9 +27,11 @@ class LoadCellWeightTestDialog(QtWidgets.QFrame):
         self._scale = scale
         self._live_grams = 0.0
         self._last_reading = "---.- g"
-        self._counts_per_gram = 572.3
-        self._tare_counts = 313358
-        self._sample_rate = 80
+        self._counts_per_gram = 0.0
+        self._tare_counts = 0
+        self._sample_rate = 0
+        self._is_calibrated = False
+        self._closed = False
 
         self.setObjectName("LoadCellTestDialog")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -260,7 +262,7 @@ class LoadCellWeightTestDialog(QtWidgets.QFrame):
         card_layout.addWidget(snap_card)
 
         # --- Section 3: Diagnostic Telemetry & Status Bar ---
-        self.meta_lbl = QtWidgets.QLabel(f"Tare: {self._tare_counts:,} counts  \u2022  {self._counts_per_gram:.1f} counts/g  \u2022  Sample Rate: {self._sample_rate} Hz")
+        self.meta_lbl = QtWidgets.QLabel("Reading load cell telemetry...")
         self.meta_lbl.setStyleSheet("color: #64748B; font-size: 10px; font-family: 'Consolas', monospace;")
         card_layout.addWidget(self.meta_lbl)
 
@@ -335,56 +337,80 @@ class LoadCellWeightTestDialog(QtWidgets.QFrame):
         if mr and mr.connected:
             host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
 
-            def _bg():
-                fg = None
-                tare_val = None
-                cpg_val = None
-                rate_val = None
+        def _bg():
+            if self._closed:
+                return
+            fg = None
+            tare_val = None
+            cpg_val = None
+            rate_val = None
+            is_cal = False
+            try:
+                url = f"http://{host}/printer/objects/query?load_cell_probe&load_cell&probe"
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=0.8) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        status = data.get("result", {}).get("status", {})
+                        lc = status.get("load_cell_probe") or status.get("load_cell") or status.get("probe") or {}
+                        is_cal = bool(lc.get("is_calibrated", False))
+                        if lc.get("force_g") is not None:
+                            fg = float(lc["force_g"])
+                        tc_raw = lc.get("tare_counts")
+                        if tc_raw is None:
+                            tc_raw = lc.get("reference_tare_counts")
+                        if tc_raw is not None:
+                            tare_val = int(tc_raw)
+                        if lc.get("counts_per_gram") is not None:
+                            cpg_val = float(lc["counts_per_gram"])
+                        if lc.get("sample_rate") is not None:
+                            rate_val = int(lc["sample_rate"])
+            except Exception:
+                pass
+
+            def _apply():
+                if self._closed:
+                    return
+                self._is_calibrated = is_cal
+                if fg is not None:
+                    self.update_live_grams(fg)
+                elif not is_cal:
+                    self.live_grams_lbl.setText("Uncalibrated")
+                    self.live_grams_lbl.setStyleSheet("color: #F59E0B; font-size: 22px; font-weight: 900; font-family: 'Consolas', monospace;")
+                if tare_val is not None:
+                    self._tare_counts = tare_val
+                if cpg_val is not None:
+                    self._counts_per_gram = cpg_val
+                if rate_val is not None:
+                    self._sample_rate = rate_val
+                tare_s = f"{self._tare_counts:,} counts" if self._tare_counts else "uncalibrated"
+                cpg_s = f"{self._counts_per_gram:.1f} counts/g" if self._counts_per_gram > 0 else "uncalibrated"
+                rate_s = f"{self._sample_rate} Hz" if self._sample_rate > 0 else "-- Hz"
                 try:
-                    url = f"http://{host}/printer/objects/query?load_cell_probe&load_cell&probe"
-                    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                    with urllib.request.urlopen(req, timeout=0.8) as resp:
-                        if resp.status == 200:
-                            data = json.loads(resp.read().decode("utf-8"))
-                            status = data.get("result", {}).get("status", {})
-                            lc = status.get("load_cell_probe") or status.get("load_cell") or status.get("probe") or {}
-                            if "force_g" in lc and lc["force_g"] is not None:
-                                fg = float(lc["force_g"])
-                            if "tare_counts" in lc:
-                                tare_val = int(lc["tare_counts"])
-                            if "counts_per_gram" in lc:
-                                cpg_val = float(lc["counts_per_gram"])
-                            if "sample_rate" in lc:
-                                rate_val = int(lc["sample_rate"])
-                except Exception:
+                    self.meta_lbl.setText(f"Tare: {tare_s}  \u2022  {cpg_s}  \u2022  Sample Rate: {rate_s}")
+                except RuntimeError:
                     pass
 
-                def _apply():
-                    if fg is not None:
-                        self.update_live_grams(fg)
-                    if tare_val is not None:
-                        self._tare_counts = tare_val
-                    if cpg_val is not None:
-                        self._counts_per_gram = cpg_val
-                    if rate_val is not None:
-                        self._sample_rate = rate_val
-                    self.meta_lbl.setText(f"Tare: {self._tare_counts:,} counts  \u2022  {self._counts_per_gram:.1f} counts/g  \u2022  Sample Rate: {self._sample_rate} Hz")
+            if mr and hasattr(mr, "_dispatch_signal"):
+                mr._dispatch_signal.emit(_apply)
+            else:
+                QtCore.QTimer.singleShot(0, _apply)
 
-                if mr and hasattr(mr, "_dispatch_signal"):
-                    mr._dispatch_signal.emit(_apply)
-                else:
-                    QtCore.QTimer.singleShot(0, _apply)
-
-            threading.Thread(target=_bg, daemon=True).start()
+        threading.Thread(target=_bg, daemon=True).start()
 
     def update_live_grams(self, grams: float):
+        if self._closed:
+            return
         self._live_grams = grams
         sign = "+" if grams > 0 else ""
-        self.live_grams_lbl.setText(f"{sign}{grams:.1f} g")
-        if abs(grams) > 20.0:
-            self.live_grams_lbl.setStyleSheet("color: #FBBF24; font-size: 26px; font-weight: 900; font-family: 'Consolas', monospace;")
-        else:
-            self.live_grams_lbl.setStyleSheet("color: #34D399; font-size: 26px; font-weight: 900; font-family: 'Consolas', monospace;")
+        try:
+            self.live_grams_lbl.setText(f"{sign}{grams:.1f} g")
+            if abs(grams) > 20.0:
+                self.live_grams_lbl.setStyleSheet("color: #FBBF24; font-size: 26px; font-weight: 900; font-family: 'Consolas', monospace;")
+            else:
+                self.live_grams_lbl.setStyleSheet("color: #34D399; font-size: 26px; font-weight: 900; font-family: 'Consolas', monospace;")
+        except RuntimeError:
+            pass
 
     def _on_read_weight(self):
         self.read_btn.setEnabled(False)
@@ -426,9 +452,9 @@ class LoadCellWeightTestDialog(QtWidgets.QFrame):
                         data = json.loads(resp.read().decode("utf-8"))
                         for item in reversed(data.get("result", {}).get("gcode_store", [])):
                             msg = item.get("message", "")
-                            m = re.search(r"//\s*(-?[\d\.]+)\s*g(?:\s*\(([\d\.]+%?)\))?", msg)
+                            m = re.search(r"//\s*(-?[\d\.]+|---.-)\s*g(?:\s*\((-?[\d\.]+%?)\))?", msg)
                             if m:
-                                read_str = m.group(1) + " g"
+                                read_str = (m.group(1) + " g") if m.group(1) != "---.-" else "Uncalibrated"
                                 pct_str = m.group(2)
                                 break
             except Exception:
@@ -443,22 +469,27 @@ class LoadCellWeightTestDialog(QtWidgets.QFrame):
                     if resp.status == 200:
                         data_q = json.loads(resp.read().decode("utf-8"))
                         lcp = data_q.get("result", {}).get("status", {}).get("load_cell_probe", {})
-                        if "force_g" in lcp:
+                        if lcp.get("force_g") is not None:
                             force_val = float(lcp["force_g"])
             except Exception:
                 pass
 
             def _update():
-                if read_str:
-                    disp = read_str
-                    if pct_str:
-                        disp += f" ({pct_str})"
-                    self.snapshot_val_lbl.setText(disp)
-                    self.snapshot_note_lbl.setText(f"Probe reading captured: {disp}")
-                elif force_val is not None:
-                    self.snapshot_val_lbl.setText(f"{force_val:.1f} g")
-                    self.snapshot_note_lbl.setText(f"Probe force: {force_val:.1f} g")
-                self.status_lbl.setText("\u2713 Attached weight reading captured.")
+                if self._closed:
+                    return
+                try:
+                    if read_str:
+                        disp = read_str
+                        if pct_str:
+                            disp += f" ({pct_str})" if read_str != "Uncalibrated" else f": {pct_str}"
+                        self.snapshot_val_lbl.setText(disp)
+                        self.snapshot_note_lbl.setText(f"Probe reading captured: {disp}")
+                    elif force_val is not None:
+                        self.snapshot_val_lbl.setText(f"{force_val:.1f} g")
+                        self.snapshot_note_lbl.setText(f"Probe force: {force_val:.1f} g")
+                    self.status_lbl.setText("\u2713 Attached weight reading captured.")
+                except RuntimeError:
+                    pass
 
             if mr and hasattr(mr, "_dispatch_signal"):
                 mr._dispatch_signal.emit(_update)
@@ -503,6 +534,7 @@ class LoadCellWeightTestDialog(QtWidgets.QFrame):
         super().close()
 
     def _cleanup(self):
+        self._closed = True
         if hasattr(self, "_poll_timer") and self._poll_timer.isActive():
             self._poll_timer.stop()
         mr = self._get_moonraker()
