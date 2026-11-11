@@ -470,6 +470,7 @@ class HistoryItemCard(QtWidgets.QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(_s(72, scale))
         self.setMinimumWidth(0)
 
         layout = QtWidgets.QHBoxLayout(self)
@@ -955,6 +956,7 @@ class HistoryPage(QtWidgets.QWidget):
             card.clicked.connect(self._open_job_details)
             card.reprint_requested.connect(self._on_reprint_requested)
             self.list_layout.addWidget(card)
+            card.show()
         self._rendered_count = end
 
         remaining = len(self._filtered_jobs) - self._rendered_count
