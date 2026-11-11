@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 
 from .qt import QtWidgets, QtCore, QtGui, Qt, Signal
 from . import icons
+from .touch_scroll import is_drag_active
 from .thumbnail_helper import load_thumbnail_async, get_default_thumbnail
 
 
@@ -81,7 +82,7 @@ def _touch_move(w, event) -> bool:
 def _touch_release(w) -> bool:
     """Returns True if this release counts as a tap (no drag happened)."""
     was_press = getattr(w, "_press_pos", None) is not None
-    dragged = getattr(w, "_dragged", False)
+    dragged = getattr(w, "_dragged", False) or is_drag_active()
     w._press_pos = None
     w._dragged = False
     return was_press and not dragged

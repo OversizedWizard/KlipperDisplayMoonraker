@@ -10,6 +10,14 @@ from __future__ import annotations
 import time
 from PySide6 import QtCore, QtGui, QtWidgets
 
+_is_dragging_globally: bool = False
+_last_drag_ended_time: float = 0.0
+
+
+def is_drag_active() -> bool:
+    """Returns True if a kinetic scroll drag is currently active or just finished (< 280ms ago)."""
+    return _is_dragging_globally or (time.time() - _last_drag_ended_time < 0.28)
+
 
 def _gpos(event) -> QtCore.QPoint:
     """Extract global position as QPoint safely across Qt6 versions."""
@@ -85,6 +93,7 @@ class KineticTouchFilter(QtCore.QObject):
         self.velocity *= 0.92  # Friction deceleration
 
     def eventFilter(self, obj: QtCore.QObject, ev: QtCore.QEvent) -> bool:
+        global _is_dragging_globally, _last_drag_ended_time
         if not isinstance(obj, QtWidgets.QWidget):
             return False
 
@@ -97,6 +106,7 @@ class KineticTouchFilter(QtCore.QObject):
         t = ev.type()
 
         if t == QtCore.QEvent.Type.MouseButtonPress and ev.button() == QtCore.Qt.MouseButton.LeftButton:
+            _is_dragging_globally = False
             if self.timer.isActive():
                 self.timer.stop()
                 self.velocity = 0.0
@@ -119,6 +129,7 @@ class KineticTouchFilter(QtCore.QObject):
             if not self.dragged:
                 if abs(pos.y() - self.press_pos.y()) > self.threshold or abs(pos.x() - self.press_pos.x()) > self.threshold:
                     self.dragged = True
+                    _is_dragging_globally = True
                     # Cancel pressed state on child widget if applicable
                     if self.active_widget and isinstance(self.active_widget, QtWidgets.QAbstractButton):
                         self.active_widget.setDown(False)
@@ -141,8 +152,12 @@ class KineticTouchFilter(QtCore.QObject):
 
         elif t == QtCore.QEvent.Type.MouseButtonRelease and ev.button() == QtCore.Qt.MouseButton.LeftButton:
             if self.active_scroll is not None:
-                was_drag = self.dragged
+                was_drag = self.dragged or _is_dragging_globally
                 now = time.time()
+
+                if was_drag:
+                    _is_dragging_globally = False
+                    _last_drag_ended_time = now
 
                 # Calculate flick fling velocity
                 if was_drag and len(self.samples) >= 2:
@@ -211,9 +226,9 @@ def touch_move(w: QtWidgets.QWidget, event: QtGui.QMouseEvent, threshold: int = 
 
 
 def touch_release(w: QtWidgets.QWidget) -> bool:
-    """Helper for cards: returns True only if this was an intentional tap (no drag)."""
+    """Helper for cards: returns True only if this was an intentional tap (no drag and scroller not active)."""
     was_pressed = getattr(w, "_touch_press_pos", None) is not None
-    dragged = getattr(w, "_touch_dragged", False)
+    dragged = getattr(w, "_touch_dragged", False) or is_drag_active()
     w._touch_press_pos = None
     w._touch_dragged = False
     return was_pressed and not dragged

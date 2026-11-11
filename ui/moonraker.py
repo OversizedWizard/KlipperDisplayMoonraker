@@ -593,6 +593,39 @@ class MoonrakerClient(QtCore.QObject):
                 self._dispatch_signal.emit(lambda: on_done(res))
         threading.Thread(target=_run, daemon=True).start()
 
+    def get_history(self, limit: int = 50, on_done=None):
+        """Fetch print job history list from Moonraker."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+        def _run():
+            jobs = []
+            try:
+                url = f"http://{host}/server/history/list?limit={limit}&order=desc"
+                with urllib.request.urlopen(url, timeout=4.0) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        jobs = data.get("result", {}).get("jobs", [])
+            except Exception as e:
+                pass
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(jobs))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def delete_all_history(self, on_done=None):
+        """Delete all print history records via Moonraker DELETE /server/history/job?all=true."""
+        host = self.active_host or (self.hosts[0] if self.hosts else "127.0.0.1:7125")
+        def _run():
+            ok = False
+            try:
+                url = f"http://{host}/server/history/job?all=true"
+                req = urllib.request.Request(url, method="DELETE")
+                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    ok = (resp.status == 200)
+            except Exception:
+                pass
+            if on_done:
+                self._dispatch_signal.emit(lambda: on_done(ok))
+        threading.Thread(target=_run, daemon=True).start()
+
     def start_print(self, filename: str, on_done=None):
         """Start printing a gcode file immediately via Moonraker API."""
         clean_fn = filename.replace("gcodes/", "").lstrip("/")

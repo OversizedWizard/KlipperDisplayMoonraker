@@ -149,6 +149,24 @@ _SVG = {
   <circle cx="32" cy="32" r="4" fill="#5B21B6"/>
 </svg>""",
 
+    "history": """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="h_ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38BDF8"/><stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <radialGradient id="h_bg" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#0EA5E9" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#0284C7" stop-opacity="0.06"/>
+    </radialGradient>
+  </defs>
+  <circle cx="32" cy="32" r="24" fill="url(#h_bg)"/>
+  <path d="M12 24 A22 22 0 1 1 11 36" fill="none" stroke="url(#h_ring)" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M7 15 L11 26 L22 21" fill="none" stroke="#38BDF8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="33" cy="32" r="3" fill="#F8FAFC"/>
+  <path d="M33 19 V32 L42 38" fill="none" stroke="#F8FAFC" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>""",
+
     "power": """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
