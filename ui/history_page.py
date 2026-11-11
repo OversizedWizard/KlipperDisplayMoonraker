@@ -942,6 +942,8 @@ class HistoryPage(QtWidgets.QWidget):
             self._append_next_batch()
         finally:
             self.list_container.setUpdatesEnabled(True)
+            self.list_layout.activate()
+            self.list_container.adjustSize()
 
     def _append_next_batch(self):
         if self._load_more_btn is not None:
@@ -976,6 +978,10 @@ class HistoryPage(QtWidgets.QWidget):
             self._append_next_batch()
         finally:
             self.list_container.setUpdatesEnabled(True)
+            self.list_layout.activate()
+            self.list_container.adjustSize()
+            self.list_layout.activate()
+            self.list_container.adjustSize()
 
     def _open_job_details(self, job: dict):
         if is_drag_active():
