@@ -8,7 +8,7 @@ Supports natural touch-drag scrolling with smooth momentum/kinetic flick deceler
 from __future__ import annotations
 
 import time
-from PySide6 import QtCore, QtGui, QtWidgets
+from .qt import QtCore, QtGui, QtWidgets
 
 _is_dragging_globally: bool = False
 _last_drag_ended_time: float = 0.0

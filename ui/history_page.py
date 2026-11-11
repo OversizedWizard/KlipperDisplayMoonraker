@@ -828,6 +828,7 @@ class HistoryPage(QtWidgets.QWidget):
             item = self.list_layout.takeAt(0)
             w = item.widget()
             if w:
+                w.setParent(None)
                 w.deleteLater()
 
         filtered = self.jobs
@@ -904,6 +905,18 @@ class HistoryPage(QtWidgets.QWidget):
         if hasattr(win, "show_page"):
             win.show_page("printing")
 
+    def _cleanup(self):
+        if self._active_dialog:
+            try:
+                self._active_dialog.close()
+                self._active_dialog.setParent(None)
+                self._active_dialog.deleteLater()
+            except Exception:
+                pass
+            self._active_dialog = None
+
     def apply_scale(self, s: float):
+        if s == self.scale:
+            return
         self.scale = s
         self._populate_list()

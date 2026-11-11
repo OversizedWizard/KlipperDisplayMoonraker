@@ -716,6 +716,26 @@ class FilesPage(QtWidgets.QWidget):
         top_bar.addWidget(self.path_lbl)
         top_bar.addStretch(1)
 
+        # Print History button (at top of file list)
+        self.btn_history = QtWidgets.QPushButton(" History ")
+        self.btn_history.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_history.setIcon(icons.icon("history", 15))
+        self.btn_history.setIconSize(QtCore.QSize(15, 15))
+        self.btn_history.setStyleSheet("""
+            QPushButton {
+                background: rgba(0, 229, 255, 0.14);
+                color: #7DD3FC;
+                border: 1px solid rgba(0, 229, 255, 0.45);
+                border-radius: 6px;
+                font-weight: 800;
+                font-size: 11px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover { background: rgba(0, 229, 255, 0.28); color: #FFFFFF; }
+        """)
+        self.btn_history.clicked.connect(self._open_history)
+        top_bar.addWidget(self.btn_history)
+
         # Timelapse Videos button
         self.btn_timelapse = QtWidgets.QPushButton(" 🎬 Timelapses ")
         self.btn_timelapse.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1023,6 +1043,25 @@ class FilesPage(QtWidgets.QWidget):
         else:
             _on_tl([])
 
+    def _open_history(self):
+        main_win = self.window()
+        mr = self.moonraker or getattr(main_win, "moonraker", None)
+        from .history_page import HistoryPage
+        hist_view = HistoryPage(moonraker=mr, scale=self._scale, parent=main_win)
+        hist_view.start_print_requested.connect(
+            lambda fn: self._start_print({"filename": fn, "full_path": fn})
+        )
+        if mr:
+            hist_view.reload_history()
+        if hasattr(main_win, "open_sub_screen"):
+            main_win.open_sub_screen(hist_view, title="Print History", return_page="files")
+        else:
+            hist_view.show()
+
     def apply_scale(self, s: float):
         self._scale = s
+        if hasattr(self, "btn_history"):
+            isz = _s(15, s)
+            self.btn_history.setIcon(icons.icon("history", isz))
+            self.btn_history.setIconSize(QtCore.QSize(isz, isz))
         self._render_view()

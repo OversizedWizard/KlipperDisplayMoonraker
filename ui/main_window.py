@@ -6,7 +6,6 @@ from datetime import datetime
 from . import icons
 from .home_page import HomePage
 from .files_page import FilesPage
-from .history_page import HistoryPage
 from .printing_page import PrintingPage
 from .calibrate_page import CalibratePage
 from .power_page import PowerPage
@@ -21,7 +20,6 @@ from .touch_scroll import install_global_touch_scroller
 NAV_ITEMS = [
     ("home", "Home", "Home", "Printer dashboard - temperatures, job progress and quick controls."),
     ("files", "Print", "Print Files", "Browse local gcode files and start 3D prints."),
-    ("history", "History", "Print History", "Review previous completed and failed print jobs."),
     ("spool", "Spool", "Spool", "Filament load / unload and spool management."),
     ("settings", "Settings", "Settings", "Printer, network, display and system configuration."),
     ("calibrate", "Calibrate", "Calibration", "Klipper hardware calibration and machine tuning."),
@@ -92,7 +90,7 @@ class Sidebar(QtWidgets.QFrame):
         for key, btn in self.buttons.items():
             btn.setIcon(icons.icon(key, size))
             btn.setIconSize(QtCore.QSize(size, size))
-            btn.setFixedHeight(_s(50, s))
+            btn.setFixedHeight(_s(54, s))
 
 
 class TopBar(QtWidgets.QFrame):
@@ -296,8 +294,6 @@ class MainWindow(QtWidgets.QWidget):
                 page = HomePage()
             elif key == "files":
                 page = FilesPage()
-            elif key == "history":
-                page = HistoryPage()
             elif key == "spool":
                 page = SpoolPage()
             elif key == "calibrate":
