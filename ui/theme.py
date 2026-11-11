@@ -44,12 +44,12 @@ QFrame#Sidebar {{
 QToolButton#NavButton {{
     background: transparent;
     border: 1px solid transparent;
-    border-radius: {px(14)};
+    border-radius: {px(10)};
     color: {c['muted']};
-    font-size: {px(11)};
+    font-size: {px(10)};
     font-weight: 600;
-    padding-top: {px(6)};
-    padding-bottom: {px(4)};
+    padding-top: {px(2)};
+    padding-bottom: {px(2)};
 }}
 QToolButton#NavButton:hover {{
     background: rgba(255, 255, 255, 12);

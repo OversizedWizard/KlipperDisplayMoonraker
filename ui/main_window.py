@@ -87,12 +87,12 @@ class Sidebar(QtWidgets.QFrame):
         m = _s(6, s)
         self._layout.setContentsMargins(m, _s(6, s), m, _s(6, s))
         self._layout.setSpacing(_s(4, s))
-        self.logo.setPixmap(icons.pixmap("logo", _s(34, s)))
+        self.logo.setPixmap(icons.pixmap("logo", _s(32, s)))
         size = _s(22, s)
         for key, btn in self.buttons.items():
             btn.setIcon(icons.icon(key, size))
             btn.setIconSize(QtCore.QSize(size, size))
-            btn.setFixedHeight(_s(48, s))
+            btn.setFixedHeight(_s(50, s))
 
 
 class TopBar(QtWidgets.QFrame):
