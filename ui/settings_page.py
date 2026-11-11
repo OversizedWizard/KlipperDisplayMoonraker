@@ -42,7 +42,6 @@ def _s(v: float, s: float) -> int:
 
 SETTINGS_CAL_ITEMS = [
     CALIBRATION_DETAILS["bed_mesh"],
-    CALIBRATION_DETAILS["z_offset"],
     CALIBRATION_DETAILS["probe_acc"],
     CALIBRATION_DETAILS["load_cell_weight_test"],
 ]
