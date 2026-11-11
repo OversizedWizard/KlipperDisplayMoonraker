@@ -1030,6 +1030,7 @@ class CalibrationDialog(QtWidgets.QFrame):
         self._known_grams = 500
         self._scale_step = 1
         self._active_lc_tab = "scale"
+        self._virtual_z = 100.0
         self._jog_z_cum = 0.0
 
         self.setObjectName("CalDialog")
@@ -1551,6 +1552,59 @@ class CalibrationDialog(QtWidgets.QFrame):
         self.pill_step1.setStyleSheet("background: #0284C7; border: 1px solid #38BDF8; border-radius: 4px; color: #FFFFFF; font-size: 10px; font-weight: 800;")
         sw_lay.addLayout(step_hdr)
 
+        # Shared Z-Jog Card (active on Step 1 & Step 2 with SET_KINEMATIC_POSITION Z=100)
+        self.lc_z_jog_card = QtWidgets.QFrame()
+        self.lc_z_jog_card.setObjectName("DialogInfoBox")
+        self.lc_z_jog_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.lc_z_jog_card.setStyleSheet("QFrame#DialogInfoBox { background: rgba(15, 23, 42, 0.78); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 7px; } QLabel { border: none; background: transparent; }")
+        zjc_lay = QtWidgets.QVBoxLayout(self.lc_z_jog_card)
+        zjc_lay.setContentsMargins(_s(7, scale), _s(4, scale), _s(7, scale), _s(5, scale))
+        zjc_lay.setSpacing(_s(3, scale))
+
+        zj_top = QtWidgets.QHBoxLayout()
+        zj_top.setSpacing(_s(4, scale))
+        self.lc_jog_status_lbl = QtWidgets.QLabel("Z: 100.00 mm (rel +0.00)  \u2022  -Z up / +Z down")
+        self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-weight: 700; font-family: 'Consolas', monospace;")
+        zj_top.addWidget(self.lc_jog_status_lbl, 1)
+
+        self.set_z100_btn = QtWidgets.QPushButton("Set Z=100")
+        self.set_z100_btn.setStyleSheet("""
+            QPushButton { background: rgba(16, 185, 129, 0.18); border: 1px solid rgba(52, 211, 153, 0.6); border-radius: 4px; color: #6EE7B7; font-size: 10px; font-weight: 800; padding: 2px 6px; min-height: 20px; }
+            QPushButton:hover { background: rgba(16, 185, 129, 0.32); color: #FFFFFF; }
+        """)
+        self.set_z100_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.set_z100_btn.clicked.connect(self._on_set_kinematic_z100)
+        zj_top.addWidget(self.set_z100_btn)
+        zjc_lay.addLayout(zj_top)
+
+        jog_btn_row = QtWidgets.QHBoxLayout()
+        jog_btn_row.setSpacing(_s(2, scale))
+        for jz in (-10.0, -1.0, -0.1, -0.05):
+            lbl = f"{jz:g}"
+            btn = QtWidgets.QPushButton(lbl)
+            btn.setStyleSheet("""
+                QPushButton { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.6); border-radius: 4px; color: #FCA5A5; font-size: 10px; font-weight: 800; padding: 0 2px; min-height: 24px; }
+                QPushButton:hover { background: rgba(239, 68, 68, 0.3); border-color: #EF4444; color: #FFFFFF; }
+                QPushButton:pressed { background: #DC2626; color: #FFFFFF; }
+            """)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _, s=jz: self._on_jog_nozzle_z(s))
+            jog_btn_row.addWidget(btn)
+
+        for jz in (+0.05, +0.1, +1.0, +10.0):
+            lbl = f"+{jz:g}"
+            btn = QtWidgets.QPushButton(lbl)
+            btn.setStyleSheet("""
+                QPushButton { background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.6); border-radius: 4px; color: #7DD3FC; font-size: 10px; font-weight: 800; padding: 0 2px; min-height: 24px; }
+                QPushButton:hover { background: rgba(56, 189, 248, 0.3); border-color: #38BDF8; color: #FFFFFF; }
+                QPushButton:pressed { background: #0284C7; color: #FFFFFF; }
+            """)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _, s=jz: self._on_jog_nozzle_z(s))
+            jog_btn_row.addWidget(btn)
+        zjc_lay.addLayout(jog_btn_row)
+        sw_lay.addWidget(self.lc_z_jog_card)
+
         # Wizard Content Stack
         self.scale_step_stack = QtWidgets.QStackedWidget()
         sw_lay.addWidget(self.scale_step_stack, 1)
@@ -1614,48 +1668,16 @@ class CalibrationDialog(QtWidgets.QFrame):
         s2_title.setStyleSheet("color: #00E5FF; font-size: 12px; font-weight: 800;")
         s2c_lay.addWidget(s2_title)
 
-        s2_desc = QtWidgets.QLabel("Hang weight OR jog Z down onto a bed scale (>=1% ADC change needed, e.g. 500-1000g). Report reading:")
+        s2_desc = QtWidgets.QLabel("Jog Z (+down to place scale, -up to press nozzle onto scale, >=1% ADC change e.g. 500-1000g). Report reading:")
         s2_desc.setStyleSheet("color: #CBD5E1; font-size: 11px; line-height: 1.2;")
         s2_desc.setWordWrap(True)
         s2c_lay.addWidget(s2_desc)
 
-        # Z Jogging Controls Row
-        jog_lbl = QtWidgets.QLabel("JOG NOZZLE Z (POSITION ONTO SCALE):")
-        jog_lbl.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800;")
-        s2c_lay.addWidget(jog_lbl)
-
-        jog_btn_row = QtWidgets.QHBoxLayout()
-        jog_btn_row.setSpacing(_s(3, scale))
-
-        # Down buttons (Lower nozzle onto scale)
-        for jz in (-1.0, -0.1, -0.05):
-            btn = QtWidgets.QPushButton(f"{jz:+.2f}")
-            btn.setStyleSheet("""
-                QPushButton { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.6); border-radius: 4px; color: #FCA5A5; font-size: 11px; font-weight: 800; min-height: 24px; }
-                QPushButton:hover { background: rgba(239, 68, 68, 0.3); border-color: #EF4444; color: #FFFFFF; }
-                QPushButton:pressed { background: #DC2626; color: #FFFFFF; }
-            """)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda _, s=jz: self._on_jog_nozzle_z(s))
-            jog_btn_row.addWidget(btn)
-
-        # Up buttons (Raise nozzle off scale)
-        for jz in (+0.05, +0.1, +1.0):
-            btn = QtWidgets.QPushButton(f"{jz:+.2f}")
-            btn.setStyleSheet("""
-                QPushButton { background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.6); border-radius: 4px; color: #7DD3FC; font-size: 11px; font-weight: 800; min-height: 24px; }
-                QPushButton:hover { background: rgba(56, 189, 248, 0.3); border-color: #38BDF8; color: #FFFFFF; }
-                QPushButton:pressed { background: #0284C7; color: #FFFFFF; }
-            """)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda _, s=jz: self._on_jog_nozzle_z(s))
-            jog_btn_row.addWidget(btn)
-
-        s2c_lay.addLayout(jog_btn_row)
-
-        self.lc_jog_status_lbl = QtWidgets.QLabel("Z Offset: +0.00 mm \u2022 Jog down to touch bed scale")
-        self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-family: 'Consolas', monospace;")
-        s2c_lay.addWidget(self.lc_jog_status_lbl)
+        self.s2_error_lbl = QtWidgets.QLabel("")
+        self.s2_error_lbl.setStyleSheet("color: #FCA5A5; font-size: 10px; font-family: 'Consolas', monospace;")
+        self.s2_error_lbl.setWordWrap(True)
+        self.s2_error_lbl.setVisible(False)
+        s2c_lay.addWidget(self.s2_error_lbl)
 
         # Scale Reading / Weight Input
         rep_lbl = QtWidgets.QLabel("REPORT SCALE READING / WEIGHT APPLIED:")
@@ -2657,10 +2679,15 @@ class CalibrationDialog(QtWidgets.QFrame):
         self.cancel_btn.setText("Close")
         self.start_btn.setVisible(False)
 
-        # Reset jog offset state
+        # Reset jog offset state and establish virtual Z=100 for unhomed scale placement
+        self._virtual_z = 100.0
         self._jog_z_cum = 0.0
         if hasattr(self, "lc_jog_status_lbl"):
-            self.lc_jog_status_lbl.setText("Z Offset: +0.00 mm \u2022 Jog down to touch bed scale")
+            self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-weight: 700; font-family: 'Consolas', monospace;")
+            self.lc_jog_status_lbl.setText("Z: 100.00 mm (rel +0.00)  \u2022  -Z up / +Z down")
+        if hasattr(self, "s2_error_lbl"):
+            self.s2_error_lbl.setVisible(False)
+            self.s2_error_lbl.setText("")
         if hasattr(self, "gantry_anim"):
             self.gantry_anim.set_jog_z(0.0)
 
@@ -2674,27 +2701,26 @@ class CalibrationDialog(QtWidgets.QFrame):
         self.gantry_anim.set_weight_calibration(True, weight_hanging=False, grams=self._known_grams, counts_per_gram=self._counts_per_gram)
         self.gantry_anim.start(sim_mode=sim)
 
-        # Start interactive LOAD_CELL_CALIBRATE in Klipper
+        # Set virtual Z=100 then start interactive LOAD_CELL_CALIBRATE in Klipper
         if mr and mr.connected:
             cal_cmd = self.item.get("target_cmd", "LOAD_CELL_CALIBRATE")
             def _on_cal_init(ok):
                 if ok:
                     self._lc_session_active = True
                     if hasattr(self, "s1_terminal_lbl"):
-                        self.s1_terminal_lbl.setText("Klipper: Calibration active. Ensure sensor is empty, then tap Send TARE.")
+                        self.s1_terminal_lbl.setText("Klipper: Calibration active (Z=100 set). Clear nozzle, then tap Send TARE.")
                         self.s1_terminal_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-family: 'Consolas', monospace;")
                 else:
-                    # Recover if a previous calibration session remained active
                     mr.send_gcode("ABORT", on_done=lambda _: mr.send_gcode(cal_cmd, on_done=_on_cal_retry))
             def _on_cal_retry(ok2):
                 self._lc_session_active = bool(ok2)
                 if hasattr(self, "s1_terminal_lbl"):
                     if ok2:
-                        self.s1_terminal_lbl.setText("Klipper: Calibration active. Ensure sensor is empty, then tap Send TARE.")
+                        self.s1_terminal_lbl.setText("Klipper: Calibration active (Z=100 set). Clear nozzle, then tap Send TARE.")
                         self.s1_terminal_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-family: 'Consolas', monospace;")
                     else:
                         self._show_gcode_error(self.s1_terminal_lbl, "Could not start LOAD_CELL_CALIBRATE.")
-            mr.send_gcode(cal_cmd, on_done=_on_cal_init)
+            mr.send_gcode("SET_KINEMATIC_POSITION Z=100", on_done=lambda _: mr.send_gcode(cal_cmd, on_done=_on_cal_init))
 
         self._lc_poll_timer = QtCore.QTimer(self)
         self._lc_poll_timer.setInterval(200)
@@ -2729,6 +2755,8 @@ class CalibrationDialog(QtWidgets.QFrame):
 
     def _update_scale_step_pills(self, step: int):
         self._scale_step = step
+        if hasattr(self, "lc_z_jog_card"):
+            self.lc_z_jog_card.setVisible(step in (1, 2))
         for idx, (pill, text) in enumerate(((self.pill_step1, "1. Empty Tare"), (self.pill_step2, "2. Hang Weight"), (self.pill_step3, "3. Accept Multiplier")), start=1):
             if idx < step:
                 pill.setText(f"\u2713 {text[3:]}")
@@ -2783,16 +2811,29 @@ class CalibrationDialog(QtWidgets.QFrame):
 
         threading.Thread(target=_bg, daemon=True).start()
 
+    def _on_set_kinematic_z100(self):
+        self._virtual_z = 100.0
+        self._jog_z_cum = 0.0
+        if hasattr(self, "lc_jog_status_lbl"):
+            self.lc_jog_status_lbl.setStyleSheet("color: #34D399; font-size: 10px; font-weight: 700; font-family: 'Consolas', monospace;")
+            self.lc_jog_status_lbl.setText("Z: 100.00 mm (rel +0.00)  \u2022  Ready to jog up/down")
+        if hasattr(self, "gantry_anim"):
+            self.gantry_anim.set_jog_z(0.0)
+        mr = self._get_moonraker()
+        if mr and mr.connected:
+            mr.send_gcode("SET_KINEMATIC_POSITION Z=100")
+
     def _on_jog_nozzle_z(self, step: float):
+        self._virtual_z += step
         self._jog_z_cum += step
         if hasattr(self, "lc_jog_status_lbl"):
-            self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-family: 'Consolas', monospace;")
-            self.lc_jog_status_lbl.setText(f"Z Offset: {self._jog_z_cum:+.2f} mm \u2022 Touch nozzle to scale")
+            self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-weight: 700; font-family: 'Consolas', monospace;")
+            self.lc_jog_status_lbl.setText(f"Z: {self._virtual_z:.2f} mm (rel {self._jog_z_cum:+.2f})  \u2022  -Z up / +Z down")
         if hasattr(self, "gantry_anim"):
             self.gantry_anim.set_jog_z(self._jog_z_cum)
         mr = self._get_moonraker()
         if mr and mr.connected:
-            mr.send_gcode(f"G91\nG1 Z{step:+.2f} F300\nG90")
+            mr.send_gcode(f"G91\nG1 Z{step:+.2f} F600\nG90")
 
     def _verify_gcode_step(self, expected_cmd: str, on_result):
         """Check recent Moonraker gcode_store because Unknown command returns HTTP 200."""
@@ -2872,9 +2913,9 @@ class CalibrationDialog(QtWidgets.QFrame):
         self._scale_step = 2
         self._update_scale_step_pills(2)
         self.scale_step_stack.setCurrentWidget(self.step2_view)
-        if hasattr(self, "lc_jog_status_lbl"):
-            self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-family: 'Consolas', monospace;")
-            self.lc_jog_status_lbl.setText(f"Z Offset: {self._jog_z_cum:+.2f} mm \u2022 Tare captured; apply known force")
+        if hasattr(self, "s2_error_lbl"):
+            self.s2_error_lbl.setVisible(False)
+            self.s2_error_lbl.setText("")
         if hasattr(self, "gantry_anim"):
             self.gantry_anim.set_weight_calibration(True, weight_hanging=True, grams=self._known_grams, counts_per_gram=self._counts_per_gram)
 
@@ -2897,15 +2938,19 @@ class CalibrationDialog(QtWidgets.QFrame):
         self.step2_btn.setEnabled(True)
         self.step2_btn.setText(f"\u25B6  Send Scale Reading (CALIBRATE GRAMS={self._known_grams})")
         if not ok:
-            if err and hasattr(self, "lc_jog_status_lbl"):
-                self.lc_jog_status_lbl.setText(f"\u26A0 {err}")
-                self.lc_jog_status_lbl.setStyleSheet("color: #FCA5A5; font-size: 11px; font-family: 'Consolas', monospace;")
+            msg = err or "CALIBRATE failed (need >=1% sensor change, e.g. press >=500g)."
+            if hasattr(self, "s2_error_lbl"):
+                self.s2_error_lbl.setText(f"\u26A0 {msg}")
+                self.s2_error_lbl.setVisible(True)
             else:
                 self._show_gcode_error(
                     getattr(self, "lc_jog_status_lbl", None),
-                    "CALIBRATE failed (need >=1% sensor change, e.g. press >=500g)."
+                    msg
                 )
             return
+        if hasattr(self, "s2_error_lbl"):
+            self.s2_error_lbl.setVisible(False)
+            self.s2_error_lbl.setText("")
         self._scale_step = 3
         self._update_scale_step_pills(3)
         self.scale_step_stack.setCurrentWidget(self.step3_view)
@@ -3007,10 +3052,14 @@ class CalibrationDialog(QtWidgets.QFrame):
             cal_cmd = self.item.get("target_cmd", "LOAD_CELL_CALIBRATE")
             mr.send_gcode("ABORT", on_done=lambda _: mr.send_gcode(cal_cmd, on_done=lambda ok: setattr(self, "_lc_session_active", bool(ok))))
         self._scale_step = 1
+        self._virtual_z = 100.0
         self._jog_z_cum = 0.0
         if hasattr(self, "lc_jog_status_lbl"):
-            self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-family: 'Consolas', monospace;")
-            self.lc_jog_status_lbl.setText("Z Offset: +0.00 mm \u2022 Jog down to touch bed scale")
+            self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-weight: 700; font-family: 'Consolas', monospace;")
+            self.lc_jog_status_lbl.setText("Z: 100.00 mm (rel +0.00)  \u2022  -Z up / +Z down")
+        if hasattr(self, "s2_error_lbl"):
+            self.s2_error_lbl.setVisible(False)
+            self.s2_error_lbl.setText("")
         if hasattr(self, "s1_terminal_lbl"):
             self.s1_terminal_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-family: 'Consolas', monospace;")
             self.s1_terminal_lbl.setText("Klipper: Restarted calibration. Ensure sensor is empty, then send TARE.")
