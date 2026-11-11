@@ -1021,11 +1021,13 @@ class CalibrationDialog(QtWidgets.QFrame):
         self._stored_trigger_force = 60
         self._target_force = 60
         self._live_force_g = 0.0
-        self._tare_counts = 313744
-        self._counts_per_gram = 572.3
+        self._tare_counts = 0
+        self._counts_per_gram = 0.0
+        self._lc_is_calibrated = False
+        self._lc_session_active = False
         self._is_lc_saving = False
         self._is_calibrating_lc = False
-        self._known_grams = 100
+        self._known_grams = 500
         self._scale_step = 1
         self._active_lc_tab = "scale"
         self._jog_z_cum = 0.0
@@ -1571,19 +1573,19 @@ class CalibrationDialog(QtWidgets.QFrame):
         s1_title.setStyleSheet("color: #34D399; font-size: 13px; font-weight: 800;")
         s1c_lay.addWidget(s1_title)
 
-        s1_desc = QtWidgets.QLabel("Ensure cold nozzle is clean with NO weight or bag attached. Then send ACCEPT to tare zero.")
+        s1_desc = QtWidgets.QLabel("Ensure cold nozzle is clean with NO weight or scale touching it. Then tap TARE below to capture empty zero.")
         s1_desc.setStyleSheet("color: #CBD5E1; font-size: 12px; line-height: 1.3;")
         s1_desc.setWordWrap(True)
         s1c_lay.addWidget(s1_desc)
 
-        self.s1_terminal_lbl = QtWidgets.QLabel("Klipper: Prompted to ensure sensor is empty.")
+        self.s1_terminal_lbl = QtWidgets.QLabel("Klipper: Ready to capture empty baseline (TARE).")
         self.s1_terminal_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-family: 'Consolas', monospace;")
         self.s1_terminal_lbl.setWordWrap(True)
         s1c_lay.addWidget(self.s1_terminal_lbl)
 
         s1_lay.addWidget(s1_card)
 
-        self.step1_btn = QtWidgets.QPushButton("\u2713  Sensor Empty \u2014 Send ACCEPT")
+        self.step1_btn = QtWidgets.QPushButton("\u2713  Sensor Empty \u2014 Send TARE")
         self.step1_btn.setStyleSheet("""
             QPushButton { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10B981, stop:1 #059669); border: 1px solid #34D399; border-radius: 8px; color: #FFFFFF; font-size: 13px; font-weight: 800; min-height: 34px; }
             QPushButton:hover { background: #10B981; }
@@ -1612,7 +1614,7 @@ class CalibrationDialog(QtWidgets.QFrame):
         s2_title.setStyleSheet("color: #00E5FF; font-size: 12px; font-weight: 800;")
         s2c_lay.addWidget(s2_title)
 
-        s2_desc = QtWidgets.QLabel("Hang a known weight OR place scale on bed under nozzle and jog Z down to touch scale. Report the scale reading:")
+        s2_desc = QtWidgets.QLabel("Hang weight OR jog Z down onto a bed scale (>=1% ADC change needed, e.g. 500-1000g). Report reading:")
         s2_desc.setStyleSheet("color: #CBD5E1; font-size: 11px; line-height: 1.2;")
         s2_desc.setWordWrap(True)
         s2c_lay.addWidget(s2_desc)
@@ -1660,10 +1662,10 @@ class CalibrationDialog(QtWidgets.QFrame):
         rep_lbl.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800;")
         s2c_lay.addWidget(rep_lbl)
 
-        # Quick preset buttons: 50g, 100g, 200g, 500g
+        # Quick preset buttons: 100g, 200g, 500g, 1000g
         preset_row = QtWidgets.QHBoxLayout()
         preset_row.setSpacing(_s(4, scale))
-        for pw in (50, 100, 200, 500):
+        for pw in (100, 200, 500, 1000):
             p_btn = QtWidgets.QPushButton(f"{pw}g")
             p_btn.setStyleSheet("""
                 QPushButton { background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.5); border-radius: 4px; color: #7DD3FC; font-size: 11px; font-weight: 800; min-height: 22px; }
@@ -1688,7 +1690,7 @@ class CalibrationDialog(QtWidgets.QFrame):
             btn.clicked.connect(lambda _, d=dw: self._adjust_known_grams(d))
             adj_row.addWidget(btn)
 
-        self.known_grams_lbl = QtWidgets.QLabel("100 g")
+        self.known_grams_lbl = QtWidgets.QLabel("500 g")
         self.known_grams_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.known_grams_lbl.setStyleSheet("color: #FFFFFF; font-size: 22px; font-weight: 900; font-family: 'Consolas', monospace;")
         adj_row.addWidget(self.known_grams_lbl, 1)
@@ -1706,7 +1708,7 @@ class CalibrationDialog(QtWidgets.QFrame):
         s2c_lay.addLayout(adj_row)
         s2_lay.addWidget(s2_card)
 
-        self.step2_btn = QtWidgets.QPushButton("\u25B6  Send Scale Reading (CALIBRATE GRAMS=100)")
+        self.step2_btn = QtWidgets.QPushButton("\u25B6  Send Scale Reading (CALIBRATE GRAMS=500)")
         self.step2_btn.setStyleSheet("""
             QPushButton { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0284C7, stop:1 #0369A1); border: 1px solid #38BDF8; border-radius: 8px; color: #FFFFFF; font-size: 13px; font-weight: 800; min-height: 32px; }
             QPushButton:hover { background: #0284C7; }
@@ -1735,11 +1737,11 @@ class CalibrationDialog(QtWidgets.QFrame):
         s3_title.setStyleSheet("color: #34D399; font-size: 13px; font-weight: 800;")
         s3c_lay.addWidget(s3_title)
 
-        self.s3_cpg_lbl = QtWidgets.QLabel("Counts / Gram: 572.31 counts/g")
+        self.s3_cpg_lbl = QtWidgets.QLabel("Counts / Gram: -- counts/g")
         self.s3_cpg_lbl.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: 900; font-family: 'Consolas', monospace;")
         s3c_lay.addWidget(self.s3_cpg_lbl)
 
-        self.s3_tare_lbl = QtWidgets.QLabel("Reference Tare: 205,315 counts")
+        self.s3_tare_lbl = QtWidgets.QLabel("Reference Tare: -- counts")
         self.s3_tare_lbl.setStyleSheet("color: #CBD5E1; font-size: 12px; font-family: 'Consolas', monospace;")
         s3c_lay.addWidget(self.s3_tare_lbl)
 
@@ -2613,12 +2615,18 @@ class CalibrationDialog(QtWidgets.QFrame):
             self._stored_trigger_force = tf
             self._target_force = tf
         if lc_status:
-            if "force_g" in lc_status:
-                self._live_force_g = float(lc_status["force_g"])
-            if "counts_per_gram" in lc_status:
-                self._counts_per_gram = float(lc_status["counts_per_gram"])
-            if "tare_counts" in lc_status:
-                self._tare_counts = int(lc_status["tare_counts"])
+            self._lc_is_calibrated = bool(lc_status.get("is_calibrated", False))
+            fg = lc_status.get("force_g")
+            if fg is not None:
+                self._live_force_g = float(fg)
+            cpg = lc_status.get("counts_per_gram")
+            if cpg is not None:
+                self._counts_per_gram = float(cpg)
+            tc = lc_status.get("tare_counts")
+            if tc is None:
+                tc = lc_status.get("reference_tare_counts")
+            if tc is not None:
+                self._tare_counts = int(tc)
 
         if hasattr(self, "lc_stored_lbl"):
             self.lc_stored_lbl.setText(f"CONFIG STORED FORCE: {self._stored_trigger_force} g")
@@ -2627,9 +2635,14 @@ class CalibrationDialog(QtWidgets.QFrame):
         if hasattr(self, "lc_delta_lbl"):
             self.lc_delta_lbl.setText("Stored in printer.cfg")
         if hasattr(self, "lc_live_force_lbl"):
-            self.lc_live_force_lbl.setText(f"LIVE SENSOR FORCE: {self._live_force_g:+.1f} g")
+            if self._lc_is_calibrated or self._counts_per_gram > 0:
+                self.lc_live_force_lbl.setText(f"LIVE SENSOR FORCE: {self._live_force_g:+.1f} g")
+            else:
+                self.lc_live_force_lbl.setText("LIVE SENSOR FORCE: Uncalibrated (run Step 1-3)")
         if hasattr(self, "lc_meta_lbl"):
-            self.lc_meta_lbl.setText(f"Tare: {self._tare_counts:,} counts  \u2022  {self._counts_per_gram:.1f} counts/g")
+            cpg_txt = f"{self._counts_per_gram:.1f} counts/g" if self._counts_per_gram > 0 else "uncalibrated"
+            tare_txt = f"{self._tare_counts:,} counts" if self._tare_counts else "uncalibrated"
+            self.lc_meta_lbl.setText(f"Tare: {tare_txt}  \u2022  {cpg_txt}")
         if hasattr(self, "gantry_anim"):
             self.gantry_anim.set_force(self._live_force_g, self._target_force)
 
@@ -2665,7 +2678,25 @@ class CalibrationDialog(QtWidgets.QFrame):
 
         # Start interactive LOAD_CELL_CALIBRATE in Klipper
         if mr and mr.connected:
-            mr.send_gcode(self.item.get("target_cmd", "LOAD_CELL_CALIBRATE"))
+            cal_cmd = self.item.get("target_cmd", "LOAD_CELL_CALIBRATE")
+            def _on_cal_init(ok):
+                if ok:
+                    self._lc_session_active = True
+                    if hasattr(self, "s1_terminal_lbl"):
+                        self.s1_terminal_lbl.setText("Klipper: Calibration active. Ensure sensor is empty, then tap Send TARE.")
+                        self.s1_terminal_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-family: 'Consolas', monospace;")
+                else:
+                    # Recover if a previous calibration session remained active
+                    mr.send_gcode("ABORT", on_done=lambda _: mr.send_gcode(cal_cmd, on_done=_on_cal_retry))
+            def _on_cal_retry(ok2):
+                self._lc_session_active = bool(ok2)
+                if hasattr(self, "s1_terminal_lbl"):
+                    if ok2:
+                        self.s1_terminal_lbl.setText("Klipper: Calibration active. Ensure sensor is empty, then tap Send TARE.")
+                        self.s1_terminal_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-family: 'Consolas', monospace;")
+                    else:
+                        self._show_gcode_error(self.s1_terminal_lbl, "Could not start LOAD_CELL_CALIBRATE.")
+            mr.send_gcode(cal_cmd, on_done=_on_cal_init)
 
         self._lc_poll_timer = QtCore.QTimer(self)
         self._lc_poll_timer.setInterval(200)
@@ -2712,7 +2743,7 @@ class CalibrationDialog(QtWidgets.QFrame):
                 pill.setStyleSheet("background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255, 255, 255, 20); border-radius: 4px; color: #64748B; font-size: 10px; font-weight: 700;")
 
     def _set_known_grams(self, grams: int):
-        self._known_grams = max(1, min(2000, grams))
+        self._known_grams = max(50, min(25000, grams))
         self.known_grams_lbl.setText(f"{self._known_grams} g")
         self.step2_btn.setText(f"\u25B6  Send Scale Reading (CALIBRATE GRAMS={self._known_grams})")
         if hasattr(self, "gantry_anim") and self.gantry_anim._weight_hanging:
@@ -2721,9 +2752,43 @@ class CalibrationDialog(QtWidgets.QFrame):
     def _adjust_known_grams(self, delta: int):
         self._set_known_grams(self._known_grams + delta)
 
+    def _show_gcode_error(self, target_lbl, fallback_msg: str):
+        mr = self._get_moonraker()
+        host = (mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")) if mr else "127.0.0.1:7125"
+
+        def _bg():
+            err_txt = None
+            try:
+                url = f"http://{host}/server/gcode_store?count=8"
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        for item in reversed(data.get("result", {}).get("gcode_store", [])):
+                            msg = item.get("message", "").strip()
+                            if msg.startswith("!!") or "error" in msg.lower() or "unknown command" in msg.lower() or "different" in msg.lower() or "must be" in msg.lower():
+                                err_txt = msg.lstrip("! ").strip()
+                                break
+            except Exception:
+                pass
+            final_msg = err_txt or fallback_msg
+
+            def _ui():
+                if target_lbl is not None:
+                    target_lbl.setText(f"\u26A0 {final_msg}")
+                    target_lbl.setStyleSheet("color: #FCA5A5; font-size: 11px; font-family: 'Consolas', monospace;")
+
+            if mr and hasattr(mr, "_dispatch_signal"):
+                mr._dispatch_signal.emit(_ui)
+            else:
+                QtCore.QTimer.singleShot(0, _ui)
+
+        threading.Thread(target=_bg, daemon=True).start()
+
     def _on_jog_nozzle_z(self, step: float):
         self._jog_z_cum += step
         if hasattr(self, "lc_jog_status_lbl"):
+            self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-family: 'Consolas', monospace;")
             self.lc_jog_status_lbl.setText(f"Z Offset: {self._jog_z_cum:+.2f} mm \u2022 Touch nozzle to scale")
         if hasattr(self, "gantry_anim"):
             self.gantry_anim.set_jog_z(self._jog_z_cum)
@@ -2733,19 +2798,30 @@ class CalibrationDialog(QtWidgets.QFrame):
 
     def _on_scale_step1_accept(self):
         self.step1_btn.setEnabled(False)
-        self.step1_btn.setText("Capturing empty zero...")
+        self.step1_btn.setText("Capturing empty zero (TARE)...")
         mr = self._get_moonraker()
         if mr and mr.connected:
-            mr.send_gcode("ACCEPT", on_done=lambda ok: self._after_step1_tare())
+            mr.send_gcode("TARE", on_done=lambda ok: self._after_step1_tare(ok))
         else:
-            QtCore.QTimer.singleShot(400, self._after_step1_tare)
+            QtCore.QTimer.singleShot(400, lambda: self._after_step1_tare(True))
 
-    def _after_step1_tare(self):
+    def _after_step1_tare(self, ok: bool = True):
         self.step1_btn.setEnabled(True)
-        self.step1_btn.setText("\u2713  Sensor Empty \u2014 Send ACCEPT")
+        self.step1_btn.setText("\u2713  Sensor Empty \u2014 Send TARE")
+        if not ok:
+            self._show_gcode_error(
+                getattr(self, "s1_terminal_lbl", None),
+                "TARE failed. Ensure Klipper is READY and LOAD_CELL_CALIBRATE is active."
+            )
+            return
+        self._lc_session_active = True
+        self._fetch_scale_calibration_multiplier(update_step3=False)
         self._scale_step = 2
         self._update_scale_step_pills(2)
         self.scale_step_stack.setCurrentWidget(self.step2_view)
+        if hasattr(self, "lc_jog_status_lbl"):
+            self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-family: 'Consolas', monospace;")
+            self.lc_jog_status_lbl.setText(f"Z Offset: {self._jog_z_cum:+.2f} mm \u2022 Tare captured; apply known force")
         if hasattr(self, "gantry_anim"):
             self.gantry_anim.set_weight_calibration(True, weight_hanging=True, grams=self._known_grams, counts_per_gram=self._counts_per_gram)
 
@@ -2755,19 +2831,25 @@ class CalibrationDialog(QtWidgets.QFrame):
         mr = self._get_moonraker()
         cmd = f"CALIBRATE GRAMS={self._known_grams}"
         if mr and mr.connected:
-            mr.send_gcode(cmd, on_done=lambda ok: self._after_step2_calibrate())
+            mr.send_gcode(cmd, on_done=lambda ok: self._after_step2_calibrate(ok))
         else:
-            QtCore.QTimer.singleShot(600, self._after_step2_calibrate)
+            QtCore.QTimer.singleShot(600, lambda: self._after_step2_calibrate(True))
 
-    def _after_step2_calibrate(self):
+    def _after_step2_calibrate(self, ok: bool = True):
         self.step2_btn.setEnabled(True)
         self.step2_btn.setText(f"\u25B6  Send Scale Reading (CALIBRATE GRAMS={self._known_grams})")
+        if not ok:
+            self._show_gcode_error(
+                getattr(self, "lc_jog_status_lbl", None),
+                "CALIBRATE failed (need >=1% sensor change, e.g. press >=500g)."
+            )
+            return
         self._scale_step = 3
         self._update_scale_step_pills(3)
         self.scale_step_stack.setCurrentWidget(self.step3_view)
-        self._fetch_scale_calibration_multiplier()
+        self._fetch_scale_calibration_multiplier(update_step3=True)
 
-    def _fetch_scale_calibration_multiplier(self):
+    def _fetch_scale_calibration_multiplier(self, update_step3: bool = True):
         mr = self._get_moonraker()
         host = (mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")) if mr else "127.0.0.1:7125"
 
@@ -2775,20 +2857,22 @@ class CalibrationDialog(QtWidgets.QFrame):
             cpg_found = None
             tare_found = None
             try:
-                url = f"http://{host}/server/gcode_store?count=40"
+                url = f"http://{host}/server/gcode_store?count=25"
                 req = urllib.request.Request(url, headers={"Accept": "application/json"})
                 with urllib.request.urlopen(req, timeout=1.8) as resp:
                     if resp.status == 200:
                         data = json.loads(resp.read().decode("utf-8"))
                         for item in reversed(data.get("result", {}).get("gcode_store", [])):
                             msg = item.get("message", "")
-                            m_cpg = re.search(r"counts_per_gram\s*=\s*([\d\.]+)", msg, re.IGNORECASE)
-                            if m_cpg:
-                                cpg_found = float(m_cpg.group(1))
-                            m_tare = re.search(r"reference_tare_counts\s*=\s*(-?\d+)", msg, re.IGNORECASE)
-                            if m_tare:
-                                tare_found = int(m_tare.group(1))
-                            if cpg_found is not None:
+                            if cpg_found is None:
+                                m_cpg = re.search(r"Counts/gram:\s*([\d\.]+)|counts_per_gram\s*[:=]\s*([\d\.]+)", msg, re.IGNORECASE)
+                                if m_cpg:
+                                    cpg_found = float(m_cpg.group(1) or m_cpg.group(2))
+                            if tare_found is None:
+                                m_tare = re.search(r"Load cell tare value:\s*[-\d\.]+%\s*\((-?\d+)\)|reference_tare_counts\s*[:=]\s*(-?\d+)", msg, re.IGNORECASE)
+                                if m_tare:
+                                    tare_found = int(m_tare.group(1) or m_tare.group(2))
+                            if cpg_found is not None and tare_found is not None:
                                 break
             except Exception:
                 pass
@@ -2800,22 +2884,25 @@ class CalibrationDialog(QtWidgets.QFrame):
                     if resp.status == 200:
                         data = json.loads(resp.read().decode("utf-8"))
                         lcp = data.get("result", {}).get("status", {}).get("load_cell_probe", {})
-                        if cpg_found is None and "counts_per_gram" in lcp:
+                        if cpg_found is None and lcp.get("counts_per_gram") is not None:
                             cpg_found = float(lcp["counts_per_gram"])
-                        if tare_found is None and "reference_tare_counts" in lcp:
+                        if tare_found is None and lcp.get("reference_tare_counts") is not None:
                             tare_found = int(lcp["reference_tare_counts"])
             except Exception:
                 pass
 
             def _apply():
-                if cpg_found:
+                if cpg_found is not None:
                     self._counts_per_gram = cpg_found
-                if tare_found:
+                if tare_found is not None:
                     self._tare_counts = tare_found
-                self.s3_cpg_lbl.setText(f"Counts / Gram: {self._counts_per_gram:.2f} counts/g")
-                self.s3_tare_lbl.setText(f"Reference Tare: {self._tare_counts:,} counts")
-                if hasattr(self, "gantry_anim"):
-                    self.gantry_anim.set_weight_calibration(True, weight_hanging=True, grams=self._known_grams, counts_per_gram=self._counts_per_gram)
+                if update_step3:
+                    cpg_s = f"{self._counts_per_gram:.2f} counts/g" if self._counts_per_gram > 0 else "-- counts/g"
+                    tare_s = f"{self._tare_counts:,} counts" if self._tare_counts else "-- counts"
+                    self.s3_cpg_lbl.setText(f"Counts / Gram: {cpg_s}")
+                    self.s3_tare_lbl.setText(f"Reference Tare: {tare_s}")
+                    if hasattr(self, "gantry_anim"):
+                        self.gantry_anim.set_weight_calibration(True, weight_hanging=True, grams=self._known_grams, counts_per_gram=self._counts_per_gram)
 
             if mr and hasattr(mr, "_dispatch_signal"):
                 mr._dispatch_signal.emit(_apply)
@@ -2825,20 +2912,39 @@ class CalibrationDialog(QtWidgets.QFrame):
         threading.Thread(target=_bg, daemon=True).start()
 
     def _on_scale_step3_accept(self):
+        self.s3_accept_btn.setEnabled(False)
+        self.s3_accept_btn.setText("Saving multiplier (ACCEPT)...")
         mr = self._get_moonraker()
         if mr and mr.connected:
-            mr.send_gcode("ACCEPT", on_done=lambda ok: self._on_scale_calibration_finished(True))
+            def _after_accept(ok):
+                self.s3_accept_btn.setEnabled(True)
+                self.s3_accept_btn.setText("\u2713  Accept Multiplier (ACCEPT)")
+                if ok:
+                    self._lc_session_active = False
+                    self._fetch_scale_calibration_multiplier(update_step3=False)
+                    self._on_scale_calibration_finished(True)
+                else:
+                    self.cmd_lbl.setText("LOAD_CELL_CALIBRATE  \u2022  ACCEPT FAILED")
+            mr.send_gcode("ACCEPT", on_done=_after_accept)
         else:
+            self.s3_accept_btn.setEnabled(True)
+            self.s3_accept_btn.setText("\u2713  Accept Multiplier (ACCEPT)")
             self._on_scale_calibration_finished(True)
 
     def _on_scale_abort(self):
+        self._lc_session_active = False
         mr = self._get_moonraker()
         if mr and mr.connected:
-            mr.send_gcode("ABORT")
+            cal_cmd = self.item.get("target_cmd", "LOAD_CELL_CALIBRATE")
+            mr.send_gcode("ABORT", on_done=lambda _: mr.send_gcode(cal_cmd, on_done=lambda ok: setattr(self, "_lc_session_active", bool(ok))))
         self._scale_step = 1
         self._jog_z_cum = 0.0
         if hasattr(self, "lc_jog_status_lbl"):
+            self.lc_jog_status_lbl.setStyleSheet("color: #38BDF8; font-size: 10px; font-family: 'Consolas', monospace;")
             self.lc_jog_status_lbl.setText("Z Offset: +0.00 mm \u2022 Jog down to touch bed scale")
+        if hasattr(self, "s1_terminal_lbl"):
+            self.s1_terminal_lbl.setStyleSheet("color: #38BDF8; font-size: 11px; font-family: 'Consolas', monospace;")
+            self.s1_terminal_lbl.setText("Klipper: Restarted calibration. Ensure sensor is empty, then send TARE.")
         self._update_scale_step_pills(1)
         self.scale_step_stack.setCurrentWidget(self.step1_view)
         if hasattr(self, "gantry_anim"):
@@ -2902,37 +3008,50 @@ class CalibrationDialog(QtWidgets.QFrame):
                     if resp.status == 200:
                         data = json.loads(resp.read().decode("utf-8"))
                         lcp = data.get("result", {}).get("status", {}).get("load_cell_probe", {})
-                        fg = lcp.get("force_g", 0.0)
-                        tc = lcp.get("tare_counts", self._tare_counts)
-                        cpg = lcp.get("counts_per_gram", self._counts_per_gram)
+                        fg = lcp.get("force_g")
+                        tc = lcp.get("tare_counts")
+                        if tc is None:
+                            tc = lcp.get("reference_tare_counts")
+                        cpg = lcp.get("counts_per_gram")
+                        iscal = bool(lcp.get("is_calibrated", False))
                         if hasattr(mr, "_dispatch_signal"):
-                            mr._dispatch_signal.emit(lambda: self._handle_lc_live_update(fg, tc, cpg))
+                            mr._dispatch_signal.emit(lambda: self._handle_lc_live_update(fg, tc, cpg, iscal))
             except Exception:
                 pass
 
         threading.Thread(target=_bg, daemon=True).start()
 
-    def _handle_lc_live_update(self, fg, tc, cpg):
+    def _handle_lc_live_update(self, fg, tc, cpg, is_cal: bool = True):
         if not self.is_calibrating:
             return
-        self._live_force_g = float(fg)
-        self._tare_counts = int(tc)
-        if cpg:
+        self._lc_is_calibrated = is_cal
+        if fg is not None:
+            self._live_force_g = float(fg)
+        if tc is not None:
+            self._tare_counts = int(tc)
+        if cpg is not None:
             self._counts_per_gram = float(cpg)
 
-        val_str = f"{self._live_force_g:+.1f} g"
-        if abs(self._live_force_g) < 5.0:
-            col = "#34D399"
-        elif abs(self._live_force_g) < self._target_force:
-            col = "#00E5FF"
+        if not is_cal and fg is None:
+            col = "#94A3B8"
+            force_text = "LIVE SENSOR FORCE: Uncalibrated (finish Step 1-3)"
         else:
-            col = "#F59E0B"
+            val_str = f"{self._live_force_g:+.1f} g"
+            force_text = f"LIVE SENSOR FORCE: {val_str}"
+            if abs(self._live_force_g) < 5.0:
+                col = "#34D399"
+            elif abs(self._live_force_g) < self._target_force:
+                col = "#00E5FF"
+            else:
+                col = "#F59E0B"
 
         if hasattr(self, "lc_live_force_lbl"):
-            self.lc_live_force_lbl.setText(f"LIVE SENSOR FORCE: {val_str}")
+            self.lc_live_force_lbl.setText(force_text)
             self.lc_live_force_lbl.setStyleSheet(f"color: {col}; font-size: 13px; font-weight: 800; font-family: 'Consolas', monospace;")
         if hasattr(self, "lc_meta_lbl"):
-            self.lc_meta_lbl.setText(f"Tare: {self._tare_counts:,} counts  \u2022  {self._counts_per_gram:.1f} counts/g")
+            cpg_txt = f"{self._counts_per_gram:.1f} counts/g" if self._counts_per_gram > 0 else "uncalibrated"
+            tare_txt = f"{self._tare_counts:,} counts" if self._tare_counts else "uncalibrated"
+            self.lc_meta_lbl.setText(f"Tare: {tare_txt}  \u2022  {cpg_txt}")
 
         if hasattr(self, "gantry_anim"):
             self.gantry_anim.set_force(self._live_force_g, self._target_force)
@@ -3167,6 +3286,11 @@ class CalibrationDialog(QtWidgets.QFrame):
         pass
 
     def _cleanup(self):
+        if getattr(self, "_lc_session_active", False):
+            self._lc_session_active = False
+            mr = self._get_moonraker()
+            if mr and mr.connected:
+                mr.send_gcode("ABORT")
         if hasattr(self, "_probe_poll_timer") and self._probe_poll_timer.isActive():
             self._probe_poll_timer.stop()
         if hasattr(self, "_lc_poll_timer") and self._lc_poll_timer.isActive():
