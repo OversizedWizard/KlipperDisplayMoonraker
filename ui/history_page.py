@@ -874,6 +874,7 @@ class HistoryPage(QtWidgets.QWidget):
         self._active_dialog = dlg
         dlg.print_again_requested.connect(self._on_reprint_requested)
         dlg.show()
+        dlg.raise_()
 
     def _prompt_clear_all(self):
         if self._active_dialog:
@@ -886,6 +887,7 @@ class HistoryPage(QtWidgets.QWidget):
         self._active_dialog = dlg
         dlg.confirmed.connect(self._do_clear_all)
         dlg.show()
+        dlg.raise_()
 
     def _do_clear_all(self):
         if self.moonraker:
