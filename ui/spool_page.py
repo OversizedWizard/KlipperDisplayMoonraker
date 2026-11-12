@@ -403,7 +403,7 @@ class SpoolPage(QtWidgets.QWidget):
         nb_l = QtWidgets.QVBoxLayout(self.noz_stat_box)
         nb_l.setContentsMargins(8, 4, 8, 4)
         nb_l.setSpacing(1)
-        nb_k = QtWidgets.QLabel("NOZZLE PRESET")
+        nb_k = QtWidgets.QLabel("NOZZLE TEMP")
         nb_k.setStyleSheet("color: #94A3B8; font-size: 9px; font-weight: 800;")
         self.card_noz_lbl = QtWidgets.QLabel("210 \u00B0C")
         self.card_noz_lbl.setStyleSheet("color: #FF5A5F; font-size: 15px; font-weight: 900;")
@@ -497,9 +497,19 @@ class SpoolPage(QtWidgets.QWidget):
         ops_lay.setContentsMargins(12, 10, 12, 10)
         ops_lay.setSpacing(8)
 
+        ops_hdr = QtWidgets.QHBoxLayout()
         ops_title = QtWidgets.QLabel("FILAMENT ACTIONS")
         ops_title.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800; letter-spacing: 0.8px;")
-        ops_lay.addWidget(ops_title)
+        ops_hdr.addWidget(ops_title)
+        ops_hdr.addStretch(1)
+
+        self.ops_noz_badge = QtWidgets.QLabel("● Nozzle: --.-°C")
+        self.ops_noz_badge.setStyleSheet(
+            "color: #38BDF8; font-size: 11px; font-weight: 800; background: rgba(56, 189, 248, 0.12); "
+            "border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 5px; padding: 2px 7px;"
+        )
+        ops_hdr.addWidget(self.ops_noz_badge)
+        ops_lay.addLayout(ops_hdr)
 
         lu_row = QtWidgets.QHBoxLayout()
         lu_row.setSpacing(8)
@@ -547,6 +557,10 @@ class SpoolPage(QtWidgets.QWidget):
         ext_title.setStyleSheet("color: #94A3B8; font-size: 10px; font-weight: 800; letter-spacing: 0.8px;")
         ext_hdr.addWidget(ext_title)
         ext_hdr.addStretch(1)
+
+        self.ext_noz_lbl = QtWidgets.QLabel("Nozzle: --.-°C")
+        self.ext_noz_lbl.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 700;")
+        ext_hdr.addWidget(self.ext_noz_lbl)
         ext_lay.addLayout(ext_hdr)
 
         dist_row = QtWidgets.QHBoxLayout()
@@ -919,10 +933,20 @@ class SpoolPage(QtWidgets.QWidget):
             f"border-radius: 7px; padding: 3px 10px;"
         )
 
-        self.card_noz_lbl.setText(f"{noz_temp} \u00B0C")
+        if hasattr(self, "card_noz_lbl"):
+            if self._live_nozzle_cur > 0:
+                self.card_noz_lbl.setText(f"{self._live_nozzle_cur:.1f} / {noz_temp} \u00B0C")
+            else:
+                self.card_noz_lbl.setText(f"{noz_temp} \u00B0C")
         self.card_bed_lbl.setText(f"{bed_temp} \u00B0C")
         self.noz_val_lbl.setText(f"{noz_temp} \u00B0C")
         self.bed_val_lbl.setText(f"{bed_temp} \u00B0C")
+        if hasattr(self, "load_btn"):
+            self.load_btn.setText(f"\U0001F4E5  Load ({noz_temp}\u00B0C)")
+        if hasattr(self, "unload_btn"):
+            self.unload_btn.setText(f"\U0001F4E4  Unload ({noz_temp}\u00B0C)")
+        if hasattr(self, "preheat_btn"):
+            self.preheat_btn.setText(f"\U0001F525  Preheat Nozzle to {noz_temp}\u00B0C")
 
         w_g = float(data.get("weight_g", 1000))
         cap_g = max(100.0, float(data.get("capacity_g", 1000)))
@@ -1038,6 +1062,42 @@ class SpoolPage(QtWidgets.QWidget):
         self._live_nozzle_tgt = float(n_tgt)
         self._live_bed_cur = float(b_cur)
         self._live_bed_tgt = float(b_tgt)
+
+        spool_key = f"spool_{self._active_slot}"
+        noz_preset = int(self._spools.get(spool_key, {}).get("nozzle_temp", 210))
+
+        if hasattr(self, "card_noz_lbl"):
+            if n_cur > 0:
+                self.card_noz_lbl.setText(f"{n_cur:.1f} / {noz_preset} \u00B0C")
+            else:
+                self.card_noz_lbl.setText(f"{noz_preset} \u00B0C")
+
+        if hasattr(self, "ops_noz_badge"):
+            if n_cur >= 180.0:
+                tgt_s = f" / {n_tgt:.0f}\u00B0C" if n_tgt > 0 else f" / {noz_preset}\u00B0C"
+                self.ops_noz_badge.setText(f"\U0001F525 Nozzle: {n_cur:.1f}\u00B0C{tgt_s} (HOT)")
+                self.ops_noz_badge.setStyleSheet(
+                    "color: #FFFFFF; font-size: 11px; font-weight: 900; background: #EF4444; "
+                    "border: 1px solid #F87171; border-radius: 5px; padding: 2px 7px;"
+                )
+            elif n_tgt > 0:
+                self.ops_noz_badge.setText(f"\U0001F525 Heating: {n_cur:.1f}\u00B0C \u2192 {n_tgt:.0f}\u00B0C")
+                self.ops_noz_badge.setStyleSheet(
+                    "color: #FBBF24; font-size: 11px; font-weight: 800; background: rgba(245, 158, 11, 0.18); "
+                    "border: 1px solid #F59E0B; border-radius: 5px; padding: 2px 7px;"
+                )
+            else:
+                self.ops_noz_badge.setText(f"\u25CF Nozzle: {n_cur:.1f}\u00B0C / {noz_preset}\u00B0C")
+                self.ops_noz_badge.setStyleSheet(
+                    "color: #38BDF8; font-size: 11px; font-weight: 800; background: rgba(56, 189, 248, 0.12); "
+                    "border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 5px; padding: 2px 7px;"
+                )
+
+        if hasattr(self, "ext_noz_lbl"):
+            self.ext_noz_lbl.setText(f"Nozzle: {n_cur:.1f}\u00B0C")
+            self.ext_noz_lbl.setStyleSheet(
+                "color: #34D399; font-size: 10px; font-weight: 700;" if n_cur >= 170 else "color: #64748B; font-size: 10px; font-weight: 700;"
+            )
 
         if n_cur >= 180.0:
             tgt_str = f" / {n_tgt:.0f}\u00B0C" if n_tgt > 0 else ""

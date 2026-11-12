@@ -84,6 +84,13 @@ class FilamentActionDialog(QtWidgets.QFrame):
         title_col.addWidget(self.sub_lbl)
         hdr.addLayout(title_col, 1)
 
+        self.header_temp_badge = QtWidgets.QLabel(f"\U0001F525 Nozzle: {self.current_temp:.1f}\u00B0C / {self.target_temp:.0f}\u00B0C")
+        self.header_temp_badge.setStyleSheet(
+            "color: #FBBF24; background: rgba(245, 158, 11, 0.18); border: 1px solid #F59E0B; "
+            "border-radius: 6px; font-size: 12px; font-weight: 800; padding: 4px 10px;"
+        )
+        hdr.addWidget(self.header_temp_badge)
+
         self.cmd_badge = QtWidgets.QLabel(f"LOAD_FILAMENT" if self.mode == "load" else "UNLOAD_FILAMENT")
         self.cmd_badge.setObjectName("CalCmdBadge")
         hdr.addWidget(self.cmd_badge)
@@ -204,9 +211,9 @@ class FilamentActionDialog(QtWidgets.QFrame):
 
         # Manual Extrude & Retract Controls inside Load/Unload Dialog
         rc_lay.addSpacing(4)
-        man_hdr = QtWidgets.QLabel("MANUAL EXTRUDE / RETRACT")
-        man_hdr.setStyleSheet("color: #00E5FF; font-size: 10px; font-weight: 800; letter-spacing: 0.5px;")
-        rc_lay.addWidget(man_hdr)
+        self.man_ext_hdr = QtWidgets.QLabel(f"MANUAL EXTRUDE / RETRACT  •  Nozzle: {self.current_temp:.1f}°C")
+        self.man_ext_hdr.setStyleSheet("color: #00E5FF; font-size: 10px; font-weight: 800; letter-spacing: 0.5px;")
+        rc_lay.addWidget(self.man_ext_hdr)
 
         man_grid = QtWidgets.QGridLayout()
         man_grid.setHorizontalSpacing(_s(6, scale))
@@ -501,12 +508,28 @@ class FilamentActionDialog(QtWidgets.QFrame):
         pct = min(100, max(0, int((self.current_temp / max(1.0, self.target_temp)) * 100)))
         self.temp_bar.setValue(pct)
         self.temp_lbl.setText(f"Nozzle Temp: {self.current_temp:.1f}°C / {self.target_temp:.0f}°C")
+        if hasattr(self, "man_ext_hdr"):
+            self.man_ext_hdr.setText(f"MANUAL EXTRUDE / RETRACT  •  Nozzle: {self.current_temp:.1f}°C")
 
         if self._is_completed:
             return
 
         # Consider hot when within 4°C of target OR already >= 185°C melting temp
         is_hot = (self.current_temp >= (self.target_temp - 4.0)) or (self.current_temp >= 185.0)
+
+        if hasattr(self, "header_temp_badge"):
+            if is_hot:
+                self.header_temp_badge.setText(f"\U0001F525 Nozzle: {self.current_temp:.1f}\u00B0C / {self.target_temp:.0f}\u00B0C (HOT)")
+                self.header_temp_badge.setStyleSheet(
+                    "color: #FFFFFF; background: #EF4444; border: 1px solid #F87171; "
+                    "border-radius: 6px; font-size: 12px; font-weight: 900; padding: 4px 10px;"
+                )
+            else:
+                self.header_temp_badge.setText(f"\U0001F525 Heating Nozzle: {self.current_temp:.1f}\u00B0C \u2192 {self.target_temp:.0f}\u00B0C")
+                self.header_temp_badge.setStyleSheet(
+                    "color: #FBBF24; background: rgba(245, 158, 11, 0.18); border: 1px solid #F59E0B; "
+                    "border-radius: 6px; font-size: 12px; font-weight: 800; padding: 4px 10px;"
+                )
 
         if not is_hot:
             self.status_title.setText("STEP 1: HEATING NOZZLE")
