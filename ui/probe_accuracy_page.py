@@ -499,6 +499,23 @@ class ProbeAccuracyScreen(QtWidgets.QFrame):
             self.sample_btns[count] = btn
         side.addLayout(sample_btn_layout)
 
+        # Statistics Card
+        stats_box = QtWidgets.QFrame()
+        stats_box.setObjectName("StatsBox")
+        stats_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        stats_box.setStyleSheet("""
+            QFrame#StatsBox {
+                background: rgba(15, 23, 42, 0.85);
+                border: 1px solid rgba(0, 229, 255, 0.35);
+                border-left: 4px solid #00E5FF;
+                border-radius: 8px;
+            }
+        """)
+        sg = QtWidgets.QGridLayout(stats_box)
+        sg.setContentsMargins(10, 8, 10, 8)
+        sg.setHorizontalSpacing(10)
+        sg.setVerticalSpacing(4)
+
         self.stat_labels = {}
         fields = [
             ("STD DEV", "std", "#34D399"),
