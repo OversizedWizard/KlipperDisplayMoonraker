@@ -84,13 +84,12 @@ CALIBRATION_DETAILS = {
         "icon": "zoffset",
         "title": "Z-Offset Adjust",
         "cmd": "Z_OFFSET_APPLY_PROBE",
-        "desc": "Tune first layer nozzle squish.",
-        "prereqs": "Babystep adjustments must have been made during an active first layer.",
+        "desc": "Fine-tune nozzle Z-offset up/down & save to config.",
+        "prereqs": "Run Probe Calibrate first to set baseline probe Z-offset.",
         "steps": [
-            "1. Calculates cumulative live babystep distance.",
-            "2. Applies offset permanently to probe Z calibration.",
-            "3. Saves to config file without losing physical zero.",
-            "4. Run SAVE_CONFIG to persist across reboots."
+            "1. Select step increment (0.1, 0.05, or 0.025 mm).",
+            "2. Tune Z-offset UP (+) or DOWN (-) to dial in first-layer height.",
+            "3. Tap Apply & Restart Firmware to save to printer.cfg."
         ],
         "target_cmd": "Z_OFFSET_APPLY_PROBE"
     },
@@ -278,6 +277,7 @@ CALIBRATION_DETAILS = {
 
 CALIBRATION_LIST = [
     CALIBRATION_DETAILS["probe_cal"],
+    CALIBRATION_DETAILS["z_offset"],
     CALIBRATION_DETAILS["load_cell_cal"],
     CALIBRATION_DETAILS["z_tilt"],
     CALIBRATION_DETAILS["dual_z_trim"],

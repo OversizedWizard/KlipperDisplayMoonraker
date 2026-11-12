@@ -247,7 +247,7 @@ class ZOffsetScreen(QtWidgets.QFrame):
         self._stored_z = -0.200
         self._target_z = -0.200
         self._clearance_delta = 0.0
-        self._step_size = 0.010
+        self._step_size = 0.025
         self._busy = False
         self._confirm_save = False
         self._at_paper_pos = False
@@ -501,8 +501,8 @@ class ZOffsetScreen(QtWidgets.QFrame):
         step_row = QtWidgets.QHBoxLayout()
         step_row.setSpacing(4)
         self.step_btns = {}
-        for s_val in (0.005, 0.010, 0.050, 0.100):
-            lbl_txt = f"{s_val:g}mm"
+        for s_val in (0.025, 0.050, 0.100):
+            lbl_txt = f"{s_val:g} mm"
             btn = QtWidgets.QPushButton(lbl_txt)
             btn.setCheckable(True)
             btn.setChecked(abs(s_val - self._step_size) < 1e-6)
@@ -551,7 +551,7 @@ class ZOffsetScreen(QtWidgets.QFrame):
         side.addLayout(jog_row)
 
         # Save Button
-        self.save_btn = QtWidgets.QPushButton("💾  Save to Config (SAVE_CONFIG)")
+        self.save_btn = QtWidgets.QPushButton("💾  Save && Restart Firmware")
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.setStyleSheet(_BTN_SAVE)
         self.save_btn.setEnabled(False)
@@ -624,8 +624,9 @@ class ZOffsetScreen(QtWidgets.QFrame):
             val = -0.200
             px = 117.5
             py = 112.5
+            cur_gcode_z = 0.0
             try:
-                url = f"http://{host}/printer/objects/query?configfile&toolhead"
+                url = f"http://{host}/printer/objects/query?configfile&toolhead&gcode_move"
                 req = urllib.request.Request(url, headers={"Accept": "application/json"})
                 with urllib.request.urlopen(req, timeout=2.5) as resp:
                     if resp.status == 200:
@@ -650,14 +651,18 @@ class ZOffsetScreen(QtWidgets.QFrame):
                         elif "stepper_x" in cfg and "stepper_y" in cfg:
                             px = float(cfg["stepper_x"].get("position_max", 235)) / 2.0
                             py = float(cfg["stepper_y"].get("position_max", 225)) / 2.0
+                        gm = st.get("gcode_move", {}) or {}
+                        ho = gm.get("homing_origin", []) or []
+                        if len(ho) >= 3:
+                            cur_gcode_z = round(float(ho[2]), 4)
             except Exception:
                 pass
 
             def _apply():
                 self._probe_section = sec
                 self._stored_z = val
-                self._target_z = val
-                self._clearance_delta = 0.0
+                self._clearance_delta = cur_gcode_z
+                self._target_z = round(val - cur_gcode_z, 4)
                 self._probe_x = px
                 self._probe_y = py
                 self.probe_pos_badge.setText(f"Probe: X{px:.1f} Y{py:.1f}")
@@ -738,9 +743,13 @@ class ZOffsetScreen(QtWidgets.QFrame):
         self._update_display()
 
         mr = self._get_moonraker()
-        if self._at_paper_pos and mr and mr.connected:
-            mr.send_gcode("SET_GCODE_OFFSET Z=0 MOVE=1 MOVE_SPEED=5")
-            self.paper_status.setText("Reset Z offset to 0. Nozzle returned to nominal Z=0.0 mm.")
+        if mr and mr.connected:
+            mr.active_print_babystep = 0.0
+            if self._at_paper_pos:
+                mr.send_gcode("SET_GCODE_OFFSET Z=0 MOVE=1 MOVE_SPEED=5")
+                self.paper_status.setText("Reset Z offset to 0. Nozzle returned to nominal Z=0.0 mm.")
+            else:
+                mr.send_gcode("SET_GCODE_OFFSET Z=0 MOVE=0")
         self.status_lbl.setText(f"Reset target z_offset to stored value ({self._stored_z:+.3f} mm).")
 
     def _on_move_to_probe_area(self):
@@ -876,7 +885,7 @@ class ZOffsetScreen(QtWidgets.QFrame):
         # Two-tap armed confirmation
         if not self._confirm_save:
             self._confirm_save = True
-            self.save_btn.setText("⚠️  Tap Again to Confirm (Restart)")
+            self.save_btn.setText("⚠️  Tap Again to Restart Firmware")
             self.save_btn.setStyleSheet("""
                 QPushButton {
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F59E0B, stop:1 #D97706);
@@ -884,7 +893,7 @@ class ZOffsetScreen(QtWidgets.QFrame):
                     font-size: 12px; font-weight: 900; min-height: 32px; padding: 2px 10px;
                 }
             """)
-            self.status_lbl.setText("Confirm: Saving will apply offset and restart Klipper (SAVE_CONFIG).")
+            self.status_lbl.setText("Confirm: Saving will apply offset and restart Klipper firmware (SAVE_CONFIG).")
             QtCore.QTimer.singleShot(4500, self._disarm_save)
             return
 
@@ -925,12 +934,14 @@ class ZOffsetScreen(QtWidgets.QFrame):
 
     def _disarm_save(self):
         self._confirm_save = False
-        self.save_btn.setText("💾  Save to Config (SAVE_CONFIG)")
+        self.save_btn.setText("💾  Save && Restart Firmware")
         self.save_btn.setStyleSheet(_BTN_SAVE)
 
     def _after_save_restart(self, ok: bool):
-        self.status_lbl.setText("Klipper restarting to apply new z_offset in printer.cfg...")
+        self.status_lbl.setText("Restarting firmware to apply new z_offset in printer.cfg...")
         mr = self._get_moonraker()
+        if mr:
+            mr.active_print_babystep = 0.0
         host = self._host(mr) if mr else "127.0.0.1:7125"
         self._restart_tries = 0
 
@@ -948,6 +959,12 @@ class ZOffsetScreen(QtWidgets.QFrame):
                 pass
 
             if ready:
+                if mr:
+                    try:
+                        mr._config_fetched = False
+                        mr._fetch_config_and_objects(host)
+                    except Exception:
+                        pass
                 def _fin():
                     self._busy = False
                     self.up_btn.setEnabled(True)
