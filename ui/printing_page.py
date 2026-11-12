@@ -237,15 +237,15 @@ class PrintingPage(QtWidgets.QWidget):
             }
         """)
         z_info_lay = QtWidgets.QVBoxLayout(self.z_info_card)
-        z_info_lay.setContentsMargins(10, 7, 10, 7)
-        z_info_lay.setSpacing(4)
+        z_info_lay.setContentsMargins(10, 6, 10, 6)
+        z_info_lay.setSpacing(3)
 
-        # Row 1: Adjusted Z-Offset
+        # Row 1: New Probe Z Offset (Base Probe Z - Babystep Offset)
         r1 = QtWidgets.QHBoxLayout()
         r1.setSpacing(4)
-        lbl_adj_title = QtWidgets.QLabel("Z Offset")
-        lbl_adj_title.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 800;")
-        self.adj_z_val_lbl = QtWidgets.QLabel("+0.000 mm")
+        lbl_adj_title = QtWidgets.QLabel("New Probe Z")
+        lbl_adj_title.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 800;")
+        self.adj_z_val_lbl = QtWidgets.QLabel("0.000 mm")
         self.adj_z_val_lbl.setStyleSheet("color: #00E5FF; font-size: 13px; font-weight: 900; font-family: monospace;")
         r1.addWidget(lbl_adj_title)
         r1.addStretch(1)
@@ -256,13 +256,25 @@ class PrintingPage(QtWidgets.QWidget):
         r2 = QtWidgets.QHBoxLayout()
         r2.setSpacing(4)
         lbl_bs_title = QtWidgets.QLabel("Baby Steps")
-        lbl_bs_title.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 800;")
-        self.babystep_added_lbl = QtWidgets.QLabel("0 (+0.00mm)")
-        self.babystep_added_lbl.setStyleSheet("color: #34D399; font-size: 13px; font-weight: 900; font-family: monospace;")
+        lbl_bs_title.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 800;")
+        self.babystep_added_lbl = QtWidgets.QLabel("0 (+0.000mm)")
+        self.babystep_added_lbl.setStyleSheet("color: #34D399; font-size: 12px; font-weight: 900; font-family: monospace;")
         r2.addWidget(lbl_bs_title)
         r2.addStretch(1)
         r2.addWidget(self.babystep_added_lbl)
         z_info_lay.addLayout(r2)
+
+        # Row 3: Base Probe Z
+        r3 = QtWidgets.QHBoxLayout()
+        r3.setSpacing(4)
+        lbl_base_title = QtWidgets.QLabel("Base Probe Z")
+        lbl_base_title.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 700;")
+        self.base_probe_z_lbl = QtWidgets.QLabel("0.000 mm")
+        self.base_probe_z_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 800; font-family: monospace;")
+        r3.addWidget(lbl_base_title)
+        r3.addStretch(1)
+        r3.addWidget(self.base_probe_z_lbl)
+        z_info_lay.addLayout(r3)
 
         left_layout.addWidget(self.z_info_card)
         left_layout.addStretch(1)
@@ -760,6 +772,10 @@ class PrintingPage(QtWidgets.QWidget):
 
         z_off = float(st.get("z_offset", 0.0))
         base_z = float(st.get("base_z_offset", 0.0))
+        if abs(base_z) < 1e-4:
+            mr = getattr(self.window(), "moonraker", None)
+            if mr:
+                base_z = float(getattr(mr, "base_z_offset", 0.0))
         b_cnt = int(st.get("babystep_count", 0))
         self.update_z_babystep(z_off, base_z=base_z, step_count=b_cnt)
 
@@ -881,26 +897,41 @@ class PrintingPage(QtWidgets.QWidget):
         mr.get_file_metadata(filename, on_done=_on_meta)
 
     def update_z_babystep(self, z_off: float, base_z: float = 0.0, step_count: int = 0):
-        """Update top badge and under-image Z Adjust Offset & Baby Steps Added telemetry."""
+        """Update top badge and under-image New Probe Z, Baby Steps Added & Base Probe Z telemetry."""
+        mr = getattr(self.window(), "moonraker", None)
+        if abs(base_z) < 1e-4 and mr:
+            base_z = float(getattr(mr, "base_z_offset", 0.0))
+            if abs(base_z) < 1e-4 and hasattr(mr, "config") and mr.config:
+                for pk in ("load_cell_probe", "probe", "bltouch", "smart_effector", "beacon"):
+                    if pk in mr.config and "z_offset" in mr.config[pk]:
+                        try:
+                            base_z = float(mr.config[pk]["z_offset"])
+                            break
+                        except (ValueError, TypeError):
+                            pass
+
         self.babystep_lbl.setText(f"Z-Offset: {z_off:+.3f} mm")
         if abs(z_off) > 1e-5:
             self._session_babystep = z_off
-        effective_z = (base_z - z_off) if abs(base_z) > 1e-4 else z_off
+
+        # In Klipper probe kinematics: New Probe Z = Base Probe Z - babystep_offset
+        # (Lifting nozzle UP +0.025mm lowers the probe offset: e.g. -0.447 - 0.025 = -0.472mm)
+        new_probe_z = round(base_z - z_off, 4)
+
         if hasattr(self, "adj_z_val_lbl"):
-            if abs(base_z) > 1e-4:
-                self.adj_z_val_lbl.setText(f"{effective_z:+.3f} mm")
-            else:
-                self.adj_z_val_lbl.setText(f"{z_off:+.3f} mm")
+            self.adj_z_val_lbl.setText(f"{new_probe_z:+.3f} mm")
+        if hasattr(self, "base_probe_z_lbl"):
+            self.base_probe_z_lbl.setText(f"{base_z:+.3f} mm")
         if hasattr(self, "babystep_added_lbl"):
             if abs(z_off) < 1e-4:
-                self.babystep_added_lbl.setText("0 (+0.00mm)")
-                self.babystep_added_lbl.setStyleSheet("color: #94A3B8; font-size: 13px; font-weight: 800; font-family: monospace;")
+                self.babystep_added_lbl.setText("0 (+0.000mm)")
+                self.babystep_added_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 800; font-family: monospace;")
             else:
                 if step_count == 0:
-                    step_count = round(z_off / 0.01)
-                self.babystep_added_lbl.setText(f"{step_count:+d} ({z_off:+.2f}mm)")
+                    step_count = round(z_off / 0.025)
+                self.babystep_added_lbl.setText(f"{step_count:+d} ({z_off:+.3f}mm)")
                 col = "#34D399" if z_off > 0 else "#FBBF24"
-                self.babystep_added_lbl.setStyleSheet(f"color: {col}; font-size: 13px; font-weight: 900; font-family: monospace;")
+                self.babystep_added_lbl.setStyleSheet(f"color: {col}; font-size: 12px; font-weight: 900; font-family: monospace;")
 
     def _set_thumb(self, pm: QtGui.QPixmap):
         if not pm.isNull():

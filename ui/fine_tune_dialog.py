@@ -16,9 +16,9 @@ class FineTuneOverlay(QtWidgets.QFrame):
     """Modal overlay with Step selector and 1 Up / 1 Down button per column (Z-offset, Speed, Flow, Fan)."""
     closed = Signal()
 
-    # Step presets: index 0 = Fine, 1 = Normal, 2 = Coarse, 3 = Large
-    Z_STEPS = [0.005, 0.01, 0.025, 0.05]
-    PCT_STEPS = [1, 5, 10, 25]
+    # Step presets: index 0 = Fine (0.01), 1 = Normal (0.025 - Default), 2 = Coarse (0.05), 3 = Large (0.10)
+    Z_STEPS = [0.01, 0.025, 0.05, 0.1]
+    PCT_STEPS = [5, 10, 25, 50]
 
     def __init__(self, parent=None, scale: float = 1.0):
         super().__init__(parent)
@@ -40,7 +40,7 @@ class FineTuneOverlay(QtWidgets.QFrame):
         self._flow_pct = 100
         self._fan_pct = 0
 
-        # Active step index (default 1 -> 0.01 mm for Z, 5% for Speed/Flow/Fan)
+        # Active step index (default 1 -> 0.025 mm for Z, 10% for Speed/Flow/Fan)
         self._step_idx = 1
         self._z_step = self.Z_STEPS[self._step_idx]
         self._spd_step = self.PCT_STEPS[self._step_idx]
@@ -59,6 +59,14 @@ class FineTuneOverlay(QtWidgets.QFrame):
                 self._speed_pct = round(float(st.get("speed_factor", 1.0)) * 100)
                 self._flow_pct = round(float(st.get("extrude_factor", 1.0)) * 100)
                 self._fan_pct = round(float(st.get("fan_speed", 0.0)) * 100)
+            if abs(self._base_z_offset) < 1e-4 and hasattr(self._moonraker, "config") and self._moonraker.config:
+                for pk in ("load_cell_probe", "probe", "bltouch", "smart_effector", "beacon"):
+                    if pk in self._moonraker.config and "z_offset" in self._moonraker.config[pk]:
+                        try:
+                            self._base_z_offset = float(self._moonraker.config[pk]["z_offset"])
+                            break
+                        except (ValueError, TypeError):
+                            pass
 
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -136,10 +144,10 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
         self._step_btns = []
         step_labels = [
-            ("0.005 mm  /  1%", 0),
-            ("0.01 mm  /  5%", 1),
-            ("0.025 mm  /  10%", 2),
-            ("0.05 mm  /  25%", 3),
+            ("0.01 mm  /  5%", 0),
+            ("0.025 mm  /  10%", 1),
+            ("0.05 mm  /  25%", 2),
+            ("0.10 mm  /  50%", 3),
         ]
         for txt, idx in step_labels:
             b = QtWidgets.QPushButton(txt)
@@ -411,6 +419,8 @@ class FineTuneOverlay(QtWidgets.QFrame):
 
         pp = pages.get("printing")
         if pp and hasattr(pp, "update_z_babystep"):
+            if abs(self._base_z_offset) < 1e-4 and self._moonraker:
+                self._base_z_offset = float(getattr(self._moonraker, "base_z_offset", 0.0))
             pp.update_z_babystep(
                 self._z_offset,
                 base_z=self._base_z_offset,
