@@ -246,7 +246,7 @@ class ZOffsetScreen(QtWidgets.QFrame):
         self._probe_section = "load_cell_probe"
         self._stored_z = -0.200
         self._target_z = -0.200
-        self._clearance_delta = 0.0
+        self._offset_delta = 0.0
         self._step_size = 0.025
         self._busy = False
         self._confirm_save = False
@@ -612,7 +612,7 @@ class ZOffsetScreen(QtWidgets.QFrame):
             self._probe_section = "load_cell_probe"
             self._stored_z = -0.200
             self._target_z = -0.200
-            self._clearance_delta = 0.0
+            self._offset_delta = 0.0
             self._update_display()
             self.status_lbl.setText("Printer offline (simulated z_offset = -0.200 mm).")
             return
@@ -661,8 +661,8 @@ class ZOffsetScreen(QtWidgets.QFrame):
             def _apply():
                 self._probe_section = sec
                 self._stored_z = val
-                self._clearance_delta = cur_gcode_z
-                self._target_z = round(val - cur_gcode_z, 4)
+                self._offset_delta = 0.0
+                self._target_z = val
                 self._probe_x = px
                 self._probe_y = py
                 self.probe_pos_badge.setText(f"Probe: X{px:.1f} Y{py:.1f}")
@@ -678,7 +678,7 @@ class ZOffsetScreen(QtWidgets.QFrame):
         self.stored_lbl.setText(f"{self._stored_z:+.3f} mm")
         self.target_lbl.setText(f"{self._target_z:+.3f} mm")
 
-        delta = self._clearance_delta
+        delta = self._offset_delta
         sign = "+" if delta > 0 else ""
         self.delta_badge.setText(f"Δ {sign}{delta:.3f}")
 
@@ -697,18 +697,17 @@ class ZOffsetScreen(QtWidgets.QFrame):
             """)
             self.save_btn.setEnabled(not self._busy)
 
-        self.canvas.set_values(self._stored_z, self._target_z, self._clearance_delta)
+        self.canvas.set_values(self._stored_z, self._target_z, self._offset_delta)
 
     def _adjust_offset(self, step: float):
         if self._busy:
             return
-        self._clearance_delta = round(self._clearance_delta + step, 4)
-        # In Klipper: new_probe_z_offset = stored_z - clearance_delta (where +clearance raises nozzle)
-        self._target_z = round(self._stored_z - self._clearance_delta, 4)
+        self._offset_delta = round(self._offset_delta + step, 4)
+        self._target_z = round(self._stored_z + self._offset_delta, 4)
         self._update_display()
 
-        sign = "+" if self._clearance_delta > 0 else ""
-        delta_str = f"{sign}{self._clearance_delta:.3f} mm"
+        sign = "+" if self._offset_delta > 0 else ""
+        delta_str = f"{sign}{self._offset_delta:.3f} mm"
 
         mr = self._get_moonraker()
         if mr and mr.connected:
@@ -731,13 +730,13 @@ class ZOffsetScreen(QtWidgets.QFrame):
             hp.axis_cards["Z"].set_position(hp._coords["Z"], is_h)
         pp = pages.get("printing")
         if pp and hasattr(pp, "update_z_babystep"):
-            b_cnt = getattr(mr, "babystep_count", 0) if mr else round(self._clearance_delta / max(self._step_size, 0.001))
-            pp.update_z_babystep(self._clearance_delta, base_z=self._stored_z, step_count=b_cnt)
+            b_cnt = getattr(mr, "babystep_count", 0) if mr else round(self._offset_delta / max(self._step_size, 0.001))
+            pp.update_z_babystep(self._offset_delta, base_z=self._stored_z, step_count=b_cnt)
 
     def _on_reset(self):
         if self._busy:
             return
-        self._clearance_delta = 0.0
+        self._offset_delta = 0.0
         self._target_z = self._stored_z
         self._confirm_save = False
         self._update_display()
@@ -879,7 +878,7 @@ class ZOffsetScreen(QtWidgets.QFrame):
         mr.send_gcode("G90\nG1 Z10 F1200", on_done=lambda ok: self._ui(mr, lambda: _done(ok)), timeout=10.0)
 
     def _on_save_config(self):
-        if self._busy or abs(self._clearance_delta) < 1e-4:
+        if self._busy or abs(self._offset_delta) < 1e-4:
             return
 
         # Two-tap armed confirmation
@@ -909,7 +908,7 @@ class ZOffsetScreen(QtWidgets.QFrame):
         mr = self._get_moonraker()
         if not (mr and mr.connected):
             self._stored_z = self._target_z
-            self._clearance_delta = 0.0
+            self._offset_delta = 0.0
             self._busy = False
             self.up_btn.setEnabled(True)
             self.down_btn.setEnabled(True)
@@ -921,10 +920,14 @@ class ZOffsetScreen(QtWidgets.QFrame):
             self.status_lbl.setText(f"✓ Saved new z_offset = {self._stored_z:+.3f} mm (simulated).")
             return
 
-        # Ensure gcode offset matches our clearance adjustment, then apply to probe/endstop and SAVE_CONFIG
+        # In Klipper, Z_OFFSET_APPLY_PROBE subtracts the homing_origin.z offset:
+        # new_calibrate = z_offset - offset.
+        # To make new_calibrate equal target_z (stored_z + offset_delta),
+        # we pass gcode offset = -offset_delta so stored_z - (-offset_delta) = target_z.
         apply_cmd = "Z_OFFSET_APPLY_ENDSTOP" if self._probe_section == "stepper_z" else "Z_OFFSET_APPLY_PROBE"
+        gcode_offset = -self._offset_delta
         cmd = (
-            f"SET_GCODE_OFFSET Z={self._clearance_delta:+.4f} MOVE=0\n"
+            f"SET_GCODE_OFFSET Z={gcode_offset:+.4f} MOVE=0\n"
             f"{apply_cmd}\n"
             f"SAVE_CONFIG"
         )
