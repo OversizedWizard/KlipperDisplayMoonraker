@@ -356,6 +356,11 @@ class ProbeAccuracyScreen(QtWidgets.QFrame):
         self._is_running = False
         self._samples_collected = []
         self._last_gcode_index = 0
+        self._probe_section = "load_cell_probe"
+        self._probe_speed = 8.0
+        self._lift_speed = 10.0
+        self._retract_dist = 3.0
+        self._init_probe_params()
 
         self.setObjectName("ProbeAccuracyScreen")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -493,6 +498,64 @@ class ProbeAccuracyScreen(QtWidgets.QFrame):
             self.sample_btns[count] = btn
         side.addLayout(sample_btn_layout)
 
+        # Probe Settings (Live Override without editing printer.cfg)
+        pset_box = QtWidgets.QFrame()
+        pset_box.setObjectName("ProbeSetBox")
+        pset_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        pset_box.setStyleSheet("""
+            QFrame#ProbeSetBox {
+                background: rgba(15, 23, 42, 0.85);
+                border: 1px solid rgba(148, 163, 184, 0.25);
+                border-radius: 8px;
+            }
+        """)
+        ps_lay = QtWidgets.QVBoxLayout(pset_box)
+        ps_lay.setContentsMargins(8, 6, 8, 6)
+        ps_lay.setSpacing(4)
+
+        ps_hdr = QtWidgets.QLabel("PROBE SETTINGS (NO CONFIG NEEDED)")
+        ps_hdr.setStyleSheet(_LBL_HDR)
+        ps_lay.addWidget(ps_hdr)
+
+        self._param_labels = {}
+        self._param_btns = []
+
+        def _add_stepper(key, label, unit, val, step, mn, mx):
+            row = QtWidgets.QHBoxLayout()
+            row.setSpacing(4)
+            lbl = QtWidgets.QLabel(label)
+            lbl.setStyleSheet("color: #CBD5E1; font-size: 11px; font-weight: 700;")
+            row.addWidget(lbl, 1)
+
+            b_dn = QtWidgets.QPushButton("-")
+            b_dn.setCursor(Qt.CursorShape.PointingHandCursor)
+            b_dn.setFixedSize(26, 22)
+            b_dn.setStyleSheet(_BTN_GHOST)
+            b_dn.clicked.connect(lambda _=False, k=key, d=-step, lo=mn, hi=mx, u=unit: self._adj_param(k, d, lo, hi, u))
+            row.addWidget(b_dn)
+
+            val_lbl = QtWidgets.QLabel(f"{val:.1f} {unit}")
+            val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            val_lbl.setFixedWidth(64)
+            val_lbl.setStyleSheet("color: #00E5FF; font-size: 11px; font-weight: 800; font-family: 'Consolas', monospace;")
+            row.addWidget(val_lbl)
+
+            b_up = QtWidgets.QPushButton("+")
+            b_up.setCursor(Qt.CursorShape.PointingHandCursor)
+            b_up.setFixedSize(26, 22)
+            b_up.setStyleSheet(_BTN_GHOST)
+            b_up.clicked.connect(lambda _=False, k=key, d=step, lo=mn, hi=mx, u=unit: self._adj_param(k, d, lo, hi, u))
+            row.addWidget(b_up)
+
+            self._param_labels[key] = val_lbl
+            self._param_btns.extend([b_dn, b_up])
+            ps_lay.addLayout(row)
+
+        _add_stepper("probe_speed", "Probe Speed", "mm/s", self._probe_speed, 0.5, 1.0, 25.0)
+        _add_stepper("lift_speed", "Lift Speed", "mm/s", self._lift_speed, 1.0, 2.0, 40.0)
+        _add_stepper("retract_dist", "Retract Hgt", "mm", self._retract_dist, 0.5, 0.5, 15.0)
+        side.addWidget(pset_box)
+
         # Statistics Card
         stats_box = QtWidgets.QFrame()
         stats_box.setObjectName("StatsBox")
@@ -539,6 +602,12 @@ class ProbeAccuracyScreen(QtWidgets.QFrame):
         self.start_btn.clicked.connect(self._on_start_test)
         side.addWidget(self.start_btn)
 
+        self.save_cfg_btn = QtWidgets.QPushButton("\U0001F4BE  Save Settings to printer.cfg")
+        self.save_cfg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.save_cfg_btn.setStyleSheet(_BTN_GHOST)
+        self.save_cfg_btn.clicked.connect(self._on_save_to_config)
+        side.addWidget(self.save_cfg_btn)
+
         side.addStretch(1)
 
         side_widget = QtWidgets.QWidget()
@@ -570,6 +639,110 @@ class ProbeAccuracyScreen(QtWidgets.QFrame):
 
         self.apply_scale(scale)
 
+    def _init_probe_params(self):
+        mr = self._get_moonraker()
+        cfg = getattr(mr, "config", {}) if mr else {}
+        for sec in ("load_cell_probe", "probe", "bltouch", "smart_effector", "beacon"):
+            if sec in cfg:
+                self._probe_section = sec
+                p = cfg[sec]
+                if "speed" in p:
+                    self._probe_speed = float(p["speed"])
+                if "lift_speed" in p:
+                    self._lift_speed = float(p["lift_speed"])
+                if "sample_retract_dist" in p:
+                    self._retract_dist = float(p["sample_retract_dist"])
+                break
+
+    def _adj_param(self, key: str, delta: float, lo: float, hi: float, unit: str):
+        if self._is_running:
+            return
+        cur = getattr(self, f"_{key}", 0.0)
+        new_val = round(max(lo, min(hi, cur + delta)), 1)
+        setattr(self, f"_{key}", new_val)
+        if key in self._param_labels:
+            self._param_labels[key].setText(f"{new_val:.1f} {unit}")
+        self.status_lbl.setText(f"Tuned {key.replace('_', ' ')} = {new_val:.1f} {unit} (active for next test without editing config).")
+
+    def _on_save_to_config(self):
+        if self._is_running:
+            return
+        mr = self._get_moonraker()
+        if not (mr and mr.connected):
+            self.status_lbl.setText("Printer offline — cannot save to config.")
+            return
+
+        host = mr.active_host or (mr.hosts[0] if mr.hosts else "127.0.0.1:7125")
+        self.save_cfg_btn.setEnabled(False)
+        self.save_cfg_btn.setText("Saving to printer.cfg...")
+
+        def _bg():
+            err_msg = None
+            try:
+                url_get = f"http://{host}/server/files/config/printer.cfg"
+                req_get = urllib.request.Request(url_get, headers={"Accept": "text/plain"})
+                with urllib.request.urlopen(req_get, timeout=5.0) as resp:
+                    txt = resp.read().decode("utf-8")
+
+                sec_name = self._probe_section or "load_cell_probe"
+                sec_re = re.compile(rf"(\[{sec_name}\][\s\S]*?)(?=\n\[|$)", re.IGNORECASE)
+                m = sec_re.search(txt)
+                if not m:
+                    raise RuntimeError(f"[{sec_name}] section not found in printer.cfg")
+
+                block = m.group(1)
+                def _rep_or_add(b, k, v):
+                    k_re = re.compile(rf"^([ \t]*{k}[ \t]*:)[ \t]*[^\r\n#]*", re.IGNORECASE | re.MULTILINE)
+                    if k_re.search(b):
+                        return k_re.sub(rf"\g<1> {v}", b)
+                    return b.rstrip() + f"\n{k}: {v}\n"
+
+                block = _rep_or_add(block, "speed", f"{self._probe_speed:.1f}")
+                block = _rep_or_add(block, "lift_speed", f"{self._lift_speed:.1f}")
+                block = _rep_or_add(block, "sample_retract_dist", f"{self._retract_dist:.1f}")
+                new_txt = sec_re.sub(block, txt, count=1)
+
+                boundary = "----KlipperScreenBoundary12345"
+                body = (
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="file"; filename="printer.cfg"\r\n'
+                    f"Content-Type: text/plain\r\n\r\n"
+                    f"{new_txt}\r\n"
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="root"\r\n\r\n'
+                    f"config\r\n"
+                    f"--{boundary}--\r\n"
+                ).encode("utf-8")
+
+                url_post = f"http://{host}/server/files/upload"
+                req_post = urllib.request.Request(
+                    url_post,
+                    data=body,
+                    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req_post, timeout=10.0) as resp:
+                    pass
+            except Exception as e:
+                err_msg = str(e)
+
+            def _done():
+                self.save_cfg_btn.setEnabled(True)
+                self.save_cfg_btn.setText("\U0001F4BE  Save Settings to printer.cfg")
+                if err_msg:
+                    self.status_lbl.setText(f"Save failed: {err_msg}")
+                else:
+                    self.status_lbl.setText(f"Saved speed {self._probe_speed:.1f}mm/s, lift {self._lift_speed:.1f}mm/s, retract {self._retract_dist:.1f}mm to printer.cfg!")
+                    if mr:
+                        mr.send_gcode("FIRMWARE_RESTART")
+
+            if hasattr(mr, "_dispatch_signal"):
+                mr._dispatch_signal.emit(_done)
+            else:
+                QtCore.QTimer.singleShot(0, _done)
+
+        threading.Thread(target=_bg, daemon=True).start()
+
     def _get_moonraker(self):
         p = self.parent()
         while p is not None:
@@ -590,7 +763,10 @@ class ProbeAccuracyScreen(QtWidgets.QFrame):
     def _set_busy(self, running: bool):
         self._is_running = running
         self.start_btn.setEnabled(not running)
+        self.save_cfg_btn.setEnabled(not running)
         for btn in self.sample_btns.values():
+            btn.setEnabled(not running)
+        for btn in getattr(self, "_param_btns", []):
             btn.setEnabled(not running)
         if running:
             self.start_btn.setText("Probing Accuracy...")
@@ -643,16 +819,22 @@ class ProbeAccuracyScreen(QtWidgets.QFrame):
             def _proceed():
                 _mr = self._get_moonraker() if hasattr(self, "_get_moonraker") else None
                 _tare = _mr.tare_gcode() if (_mr and hasattr(_mr, "tare_gcode")) else ""
+                probe_args = (
+                    f"SAMPLES={self._samples_count} "
+                    f"PROBE_SPEED={self._probe_speed:.1f} "
+                    f"LIFT_SPEED={self._lift_speed:.1f} "
+                    f"SAMPLE_RETRACT_DIST={self._retract_dist:.1f}"
+                )
                 if not is_homed:
-                    cmd = f"G28\n{_tare}PROBE_ACCURACY SAMPLES={self._samples_count}"
+                    cmd = f"G28\n{_tare}PROBE_ACCURACY {probe_args}"
                     self.start_btn.setText("Homing (G28)...")
                     self.verdict_badge.setText("HOMING (G28)")
                     self.status_lbl.setText(f"Axes not homed. Homing (G28) first, then testing accuracy...")
                 else:
-                    cmd = f"{_tare}PROBE_ACCURACY SAMPLES={self._samples_count}"
+                    cmd = f"{_tare}PROBE_ACCURACY {probe_args}"
                     self.start_btn.setText("Probing Accuracy...")
                     self.verdict_badge.setText("TEST IN PROGRESS")
-                    self.status_lbl.setText(f"Running PROBE_ACCURACY ({self._samples_count} samples)...")
+                    self.status_lbl.setText(f"Running PROBE_ACCURACY ({self._samples_count} samples @ {self._probe_speed:.1f} mm/s, retract {self._retract_dist:.1f} mm)...")
 
                 self.verdict_badge.setStyleSheet("""
                     color: #00E5FF; font-size: 10px; font-weight: 800;
