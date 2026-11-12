@@ -183,6 +183,21 @@ CALIBRATION_DETAILS = {
         ],
         "target_cmd": "PROBE_ACCURACY SAMPLES=10"
     },
+    "probe_settings": {
+        "id": "probe_settings",
+        "icon": "tune",
+        "title": "Probe Speeds & Heights",
+        "cmd": "PROBE_PARAMS",
+        "desc": "Tune descent speed, retract clearance & lift speed.",
+        "prereqs": "Configure custom speeds and retract distances without editing config.",
+        "steps": [
+            "1. Adjust probe descent speed (e.g. 2 to 8 mm/s).",
+            "2. Adjust lift speed (e.g. 5 to 15 mm/s).",
+            "3. Adjust retract clearance between probes (e.g. 1 to 4 mm).",
+            "4. Values are active for probing and can be permanently saved to printer.cfg."
+        ],
+        "target_cmd": "PROBE_PARAMS"
+    },
     "input_shaper": {
         "id": "input_shaper",
         "icon": "shaper",
@@ -350,8 +365,8 @@ def is_calibration_supported(item_id: str, config: dict = None, objects: list = 
             return False
         return "screws_tilt_adjust" in cfg or "screws_tilt_adjust" in objs or "bed_screws" in cfg or "bed_screws" in objs
 
-    # Probe Calibrate / Accuracy / Z-Offset
-    if item_id in ("probe_cal", "probe_acc", "z_offset"):
+    # Probe Calibrate / Accuracy / Z-Offset / Probe Settings
+    if item_id in ("probe_cal", "probe_acc", "z_offset", "probe_settings"):
         if not cfg and not objs:
             return True
         return any(k in cfg for k in ["probe", "bltouch", "smart_effector", "beacon", "load_cell_probe"]) or any("probe" in o for o in objs)
@@ -3586,6 +3601,14 @@ class CalibratePage(QtWidgets.QWidget):
             view = ProbeAccuracyScreen(scale=self._scale, parent=main_win)
             if hasattr(main_win, "open_sub_screen"):
                 main_win.open_sub_screen(view, title="Probe Accuracy", return_page="calibrate")
+            else:
+                view.show()
+            return
+        if item.get("id") == "probe_settings":
+            from .probe_settings_page import ProbeSettingsScreen
+            view = ProbeSettingsScreen(scale=self._scale, parent=main_win)
+            if hasattr(main_win, "open_sub_screen"):
+                main_win.open_sub_screen(view, title="Probe Speeds & Heights", return_page="calibrate")
             else:
                 view.show()
             return

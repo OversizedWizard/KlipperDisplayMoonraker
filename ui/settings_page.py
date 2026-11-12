@@ -43,6 +43,7 @@ def _s(v: float, s: float) -> int:
 SETTINGS_CAL_ITEMS = [
     CALIBRATION_DETAILS["bed_mesh"],
     CALIBRATION_DETAILS["probe_acc"],
+    CALIBRATION_DETAILS["probe_settings"],
     CALIBRATION_DETAILS["load_cell_weight_test"],
 ]
 
@@ -846,6 +847,14 @@ class SettingsPage(QtWidgets.QWidget):
             view = ProbeAccuracyScreen(scale=self._scale, parent=main_win)
             if hasattr(main_win, "open_sub_screen"):
                 main_win.open_sub_screen(view, title="Probe Accuracy", return_page="settings")
+            else:
+                view.show()
+            return
+        if item.get("id") == "probe_settings":
+            from .probe_settings_page import ProbeSettingsScreen
+            view = ProbeSettingsScreen(scale=self._scale, parent=main_win)
+            if hasattr(main_win, "open_sub_screen"):
+                main_win.open_sub_screen(view, title="Probe Speeds & Heights", return_page="settings")
             else:
                 view.show()
             return
