@@ -32,15 +32,12 @@ RE_RESULT = re.compile(
     r"\s*median\s+(-?[\d.]+),\s*standard deviation\s+(-?[\d.]+)")
 
 
-def verdict(std: float):
-    """Quality rating from standard deviation (mm)."""
-    if std <= 0.0025:
-        return "EXCELLENT", C_GREEN
-    if std <= 0.005:
-        return "GOOD", C_GREEN
-    if std <= 0.01:
-        return "FAIR", C_AMBER
-    return "POOR", C_RED
+def verdict(std: float, rng: float = 0.0):
+    """Acceptable/Not Acceptable rating from standard deviation & range (mm)."""
+    if std <= 0.025 and rng <= 0.08:
+        tier = "EXCELLENT" if std <= 0.0025 else ("GOOD" if std <= 0.005 else ("FAIR" if std <= 0.01 else "PASS"))
+        return f"ACCEPTABLE ({tier})", C_GREEN
+    return "NOT ACCEPTABLE", C_RED
 
 
 class ProbeTapAnimation(QtWidgets.QWidget):
@@ -780,14 +777,15 @@ class ProbeAccuracyScreen(QtWidgets.QFrame):
         self.stat_labels["min"].setText(f"{res['min']:.4f} mm")
         self.stat_labels["max"].setText(f"{res['max']:.4f} mm")
 
-        v_text, v_colr = verdict(res["std"])
+        v_text, v_colr = verdict(res["std"], res["range"])
         self.verdict_badge.setText(f"{v_text} (\u03C3 = {res['std']:.4f} mm)")
         self.verdict_badge.setStyleSheet(f"""
             color: {v_colr.name()}; font-size: 10px; font-weight: 800;
             background: rgba({v_colr.red()}, {v_colr.green()}, {v_colr.blue()}, 0.15);
             border: 1px solid {v_colr.name()}; border-radius: 4px; padding: 2px 8px;
         """)
-        self.status_lbl.setText(f"\u2713 Probe Accuracy complete: Range = {res['range']:.4f} mm, StdDev = {res['std']:.4f} mm")
+        mark = "\u2713" if "NOT" not in v_text else "\u2717"
+        self.status_lbl.setText(f"{mark} {v_text} — Range: {res['range']:.4f} mm, StdDev: {res['std']:.4f} mm")
 
     def _start_simulation(self):
         """Simulate realistic probe accuracy samples when running offline."""
